@@ -13,8 +13,11 @@ mod tests {
         prolog_available()
     }
 
+    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn prolog_library_loads() {
+        let _guard = TEST_LOCK.lock().unwrap();
         if !swipl_available() {
             eprintln!("skipping: SWI-Prolog not available");
             return;
@@ -23,6 +26,7 @@ mod tests {
 
     #[test]
     fn prolog_worker_thread_ping() {
+        let _guard = TEST_LOCK.lock().unwrap();
         if !swipl_available() {
             eprintln!("skipping: SWI-Prolog not available");
             return;
@@ -34,6 +38,7 @@ mod tests {
 
     #[test]
     fn prolog_engine_manager() {
+        let _guard = TEST_LOCK.lock().unwrap();
         if !swipl_available() {
             eprintln!("skipping: SWI-Prolog not available");
             return;
@@ -72,6 +77,7 @@ mod tests {
 
     #[test]
     fn prolog_foreign_handle() {
+        let _guard = TEST_LOCK.lock().unwrap();
         if !swipl_available() {
             eprintln!("skipping: SWI-Prolog not available");
             return;
@@ -116,6 +122,7 @@ mod tests {
 
     #[test]
     fn prolog_atom_to_term() {
+        let _guard = TEST_LOCK.lock().unwrap();
         if !swipl_available() {
             eprintln!("skipping: SWI-Prolog not available");
             return;
@@ -182,6 +189,7 @@ mod tests {
 
     #[test]
     fn prolog_term_to_atom() {
+        let _guard = TEST_LOCK.lock().unwrap();
         if !swipl_available() {
             eprintln!("skipping: SWI-Prolog not available");
             return;
@@ -243,6 +251,7 @@ mod tests {
 
     #[test]
     fn prolog_call_predicate() {
+        let _guard = TEST_LOCK.lock().unwrap();
         if !swipl_available() {
             eprintln!("skipping: SWI-Prolog not available");
             return;
@@ -259,6 +268,7 @@ mod tests {
 
     #[test]
     fn prolog_assert_retract() {
+        let _guard = TEST_LOCK.lock().unwrap();
         if !swipl_available() {
             eprintln!("skipping: SWI-Prolog not available");
             return;
@@ -282,6 +292,7 @@ mod tests {
 
     #[test]
     fn prolog_import_function() {
+        let _guard = TEST_LOCK.lock().unwrap();
         if !swipl_available() {
             eprintln!("skipping: SWI-Prolog not available");
             return;

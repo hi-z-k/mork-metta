@@ -258,6 +258,7 @@ impl FnTable {
     pub fn is_registered(&self, name: &str) -> bool {
         self.map.read().unwrap().contains_key(name)
             || self.fn_cache.read().unwrap().contains_key(name)
+            || self.imported_prolog_funcs.read().unwrap().contains(name)
     }
 
     pub fn get(&self, name: &str, arity: u8) -> Option<Arc<Function>> {
@@ -290,6 +291,22 @@ impl FnTable {
             .get(name)
             .and_then(|inner| inner.get(&arity))
             .cloned();
+
+        #[cfg(feature = "prolog-bridge")]
+        let res = if res.is_none() {
+            if crate::eval::prolog::builtins::try_resolve_imported_prolog_function(self, name, arity) {
+                self.map
+                    .read()
+                    .unwrap()
+                    .get(name)
+                    .and_then(|inner| inner.get(&arity))
+                    .cloned()
+            } else {
+                None
+            }
+        } else {
+            res
+        };
 
         CACHE.with(|c| {
             let mut cache = c.borrow_mut();
