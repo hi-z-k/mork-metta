@@ -50,6 +50,10 @@ pub enum PrologCommand {
     Consult {
         path: String,
     },
+    /// Load a snippet of Prolog code directly into the user module.
+    LoadCode {
+        code: String,
+    },
     /// Find all defined arities for a predicate.
     CurrentArities {
         name: String,
@@ -114,6 +118,18 @@ impl PrologClient {
             Ok(PrologReply::Pong) => Ok(()),
             Ok(PrologReply::Error(e)) => Err(e),
             _ => Err(PrologError::ThreadGone),
+        }
+    }
+
+    /// Load a snippet of Prolog code directly on the worker thread.
+    pub fn load_code(&self, code: &str) -> Result<(), PrologError> {
+        match self.request(PrologCommand::LoadCode {
+            code: code.to_string(),
+        }) {
+            Ok(PrologReply::Ack) => Ok(()),
+            Ok(PrologReply::Error(e)) => Err(e),
+            Err(e) => Err(e),
+            _ => Err(PrologError::Internal("unexpected reply to load_code".into())),
         }
     }
 
@@ -291,6 +307,12 @@ fn worker_loop(cmd_rx: mpsc::Receiver<(PrologCommand, Option<mpsc::Sender<Prolog
             }
             PrologCommand::Consult { path } => {
                 match ops::consult(api, &manager, &path) {
+                    Ok(()) => PrologReply::Ack,
+                    Err(e) => PrologReply::Error(e),
+                }
+            }
+            PrologCommand::LoadCode { code } => {
+                match ops::load_prolog_code(api, &manager, &code) {
                     Ok(()) => PrologReply::Ack,
                     Err(e) => PrologReply::Error(e),
                 }
