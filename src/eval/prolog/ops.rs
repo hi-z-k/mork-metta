@@ -493,7 +493,9 @@ pub fn current_arities(
             1,
             b"system\0".as_ptr() as *const _,
         );
-        let q = (api.open_query)(0, PL_Q_NORMAL, p_curr, spec_term);
+        let user_atom = (api.new_atom)(b"user\0".as_ptr() as *const _);
+        let user_mod = (api.new_module)(user_atom);
+        let q = (api.open_query)(user_mod, PL_Q_NORMAL, p_curr, spec_term);
 
         let mut arities = BTreeSet::new();
         if q != 0 {
