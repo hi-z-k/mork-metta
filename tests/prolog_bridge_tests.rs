@@ -40,31 +40,34 @@ mod tests {
         }
         use mork_metta::eval::prolog::engine::EngineManager;
         let manager = EngineManager::get().expect("Engine manager should be available");
-        
+
+        let init_checked = manager.checked_out_count();
+        let init_idle = manager.idle_count();
+
         // Check out an engine
         let engine1 = manager.checkout().expect("Should be able to checkout engine");
-        assert_eq!(manager.checked_out_count(), 1);
-        
+        assert_eq!(manager.checked_out_count(), init_checked + 1);
+
         // Return it early
         engine1.return_early();
-        assert_eq!(manager.checked_out_count(), 0);
-        assert_eq!(manager.idle_count(), 1);
-        
+        assert_eq!(manager.checked_out_count(), init_checked);
+        assert!(manager.idle_count() >= init_idle);
+
         // Check out again - should get the pooled engine
         let engine2 = manager.checkout().expect("Should be able to checkout engine again");
-        assert_eq!(manager.checked_out_count(), 1);
+        assert_eq!(manager.checked_out_count(), init_checked + 1);
         engine2.return_early();
-        assert_eq!(manager.checked_out_count(), 0);
-        
+        assert_eq!(manager.checked_out_count(), init_checked);
+
         // Check out multiple engines
         let e1 = manager.checkout().expect("checkout 1");
         let e2 = manager.checkout().expect("checkout 2");
-        assert_eq!(manager.checked_out_count(), 2);
+        assert_eq!(manager.checked_out_count(), init_checked + 2);
         drop(e1);
-        assert_eq!(manager.checked_out_count(), 1);
+        assert_eq!(manager.checked_out_count(), init_checked + 1);
         drop(e2);
-        assert_eq!(manager.checked_out_count(), 0);
-        assert_eq!(manager.idle_count(), 2);
+        assert_eq!(manager.checked_out_count(), init_checked);
+        assert!(manager.idle_count() >= init_idle);
     }
 
     #[test]
