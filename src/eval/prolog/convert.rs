@@ -110,22 +110,32 @@ pub fn goal_to_term(
 ) -> Result<term_t, PrologError> {
     let goal = strip_quote_atom(goal);
     if let Atom::Expr(items) = goal {
-        if items.len() == 2 && items[0].as_sym().map(|s| s == "Predicate").unwrap_or(false) {
+        if items.len() == 2 && items[0].as_sym().map(|s| s == "Predicate" || s == "Compound").unwrap_or(false) {
             return atom_to_term(goal, api, var_map);
         }
         if let Some(Atom::Sym(head)) = items.first() {
+            let head_str = head.as_str();
+            // If it's a clause operator (:- , ; -> etc.), its arguments are themselves goals/clauses!
+            if matches!(head_str, ":-" | "?-" | "," | ";" | "->" | "*->" | "\\+" | "not") {
+                let args_terms: Result<Vec<term_t>, PrologError> = items[1..]
+                    .iter()
+                    .map(|arg| goal_to_term(arg, api, var_map))
+                    .collect();
+                let args_terms = args_terms?;
+                return compound_from_terms(api, head_str, &args_terms);
+            }
             let args: Vec<&Atom> = items[1..].iter().collect();
-            return compound_to_term(api, head.as_str(), args, var_map);
+            return compound_to_term(api, head_str, args, var_map);
         }
     }
     atom_to_term(goal, api, var_map)
 }
 
-/// Extract a `(Predicate (f args...))` compound from an expression.
+/// Extract a `(Predicate (f args...))` or `(Compound f args...)` compound from an expression.
 fn extract_predicate_compound<'a>(items: &'a [Atom]) -> Option<(&'a str, Vec<&'a Atom>)> {
     if items.len() == 2 {
         if let Some(Atom::Sym(s)) = items.first() {
-            if s.as_str() == "Predicate" {
+            if s.as_str() == "Predicate" || s.as_str() == "Compound" {
                 match &items[1] {
                     Atom::Expr(inner) => {
                         if let Some(Atom::Sym(head)) = inner.first() {
@@ -140,7 +150,47 @@ fn extract_predicate_compound<'a>(items: &'a [Atom]) -> Option<(&'a str, Vec<&'a
             }
         }
     }
+    if items.len() >= 2 {
+        if let Some(Atom::Sym(s)) = items.first() {
+            if s.as_str() == "Compound" {
+                if let Some(Atom::Sym(head)) = items.get(1) {
+                    return Some((head.as_str(), items[2..].iter().collect()));
+                }
+            }
+        }
+    }
     None
+}
+
+/// Convert a compound `head(args...)` to a Prolog term from existing term handles.
+fn compound_from_terms(
+    api: &Api,
+    head: &str,
+    arg_terms: &[term_t],
+) -> Result<term_t, PrologError> {
+    let c_head = CString::new(head).map_err(|e| PrologError::Conversion(e.to_string()))?;
+    let head_atom = unsafe { (api.new_atom)(c_head.as_ptr()) };
+    let term = unsafe { (api.new_term_ref)() };
+
+    if arg_terms.is_empty() {
+        unsafe { (api.put_atom)(term, head_atom) };
+        return Ok(term);
+    }
+
+    let arity = arg_terms.len();
+    let functor = unsafe { (api.new_functor_sz)(head_atom, arity) };
+
+    let a0 = unsafe { (api.new_term_refs)(arity as std::ffi::c_int) };
+    for (i, &arg_term) in arg_terms.iter().enumerate() {
+        unsafe { (api.put_term)(a0 + i, arg_term) };
+    }
+
+    let rc = unsafe { (api.cons_functor_v)(term, functor, a0) };
+    if rc == 0 {
+        return Err(PrologError::Conversion("failed to build compound term".into()));
+    }
+
+    Ok(term)
 }
 
 /// Convert a compound `head(args...)` to a Prolog term.
