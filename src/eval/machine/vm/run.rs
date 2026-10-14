@@ -239,6 +239,8 @@ fn run_vm_inner(
                             Opcode::Transaction { .. } => "Opcode::Transaction",
                             Opcode::ImportFile { .. } => "Opcode::ImportFile",
                             Opcode::PythonImport { .. } => "Opcode::PythonImport",
+                            Opcode::PrologImport { .. } => "Opcode::PrologImport",
+                            Opcode::TranslatePredicate { .. } => "Opcode::TranslatePredicate",
                             Opcode::PyCall { .. } => "Opcode::PyCall",
                             Opcode::PyEval { .. } => "Opcode::PyEval",
                             Opcode::ImportDynamic => "Opcode::ImportDynamic",
@@ -295,6 +297,8 @@ fn run_vm_inner(
                         Opcode::Transaction { .. } => "Opcode::Transaction",
                         Opcode::ImportFile { .. } => "Opcode::ImportFile",
                         Opcode::PythonImport { .. } => "Opcode::PythonImport",
+                        Opcode::PrologImport { .. } => "Opcode::PrologImport",
+                        Opcode::TranslatePredicate { .. } => "Opcode::TranslatePredicate",
                         Opcode::PyCall { .. } => "Opcode::PyCall",
                         Opcode::PyEval { .. } => "Opcode::PyEval",
                         Opcode::ImportDynamic => "Opcode::ImportDynamic",
@@ -1731,6 +1735,7 @@ fn run_vm_inner(
                         bodies: Vec<Arc<[Opcode]>>,
                         next_body_idx: usize,
                         last: ResultSet,
+                        current_env: Env,
                         free_vars_map: Arc<[String]>,
                     }
                     let mut resume = match state
@@ -1755,7 +1760,16 @@ fn run_vm_inner(
                                         r.next_body_idx = r.bodies.len();
                                     }
                                     VmExit::Normal => {
-                                        r.last = sub_res;
+                                        if sub_res.is_empty() {
+                                            r.last = Vec::new();
+                                            r.next_body_idx = r.bodies.len();
+                                        } else {
+                                            if let Some((_, env)) = sub_res.first() {
+                                                r.current_env = env.clone();
+                                                base_env = env.clone();
+                                            }
+                                            r.last = sub_res;
+                                        }
                                     }
                                     VmExit::YieldCall { .. } => unreachable!(),
                                 }
@@ -1766,6 +1780,7 @@ fn run_vm_inner(
                             bodies: bodies.clone(),
                             next_body_idx: 0,
                             last: Vec::new(),
+                            current_env: base_env.clone(),
                             free_vars_map: free_vars_map.clone(),
                         },
                     };
@@ -1780,8 +1795,9 @@ fn run_vm_inner(
                             &state.free_vars_bindings,
                         );
                         sub_state.locals = state.locals.clone();
+                        let env_to_pass = resume.current_env.clone();
                         state.resume_data = Some(Box::new(resume));
-                        yield_vm!(state, sub_state, base_env.clone());
+                        yield_vm!(state, sub_state, env_to_pass);
                     }
                     state.stack.push(resume.last);
                     state.ip += 1;
@@ -1795,6 +1811,7 @@ fn run_vm_inner(
                         bodies: Vec<Arc<[Opcode]>>,
                         next_body_idx: usize,
                         first: ResultSet,
+                        current_env: Env,
                         free_vars_map: Arc<[String]>,
                     }
                     let mut resume = match state
@@ -1822,7 +1839,16 @@ fn run_vm_inner(
                                     }
                                     VmExit::Normal => {
                                         if r.next_body_idx == 1 {
-                                            r.first = sub_res;
+                                            r.first = sub_res.clone();
+                                        }
+                                        if sub_res.is_empty() {
+                                            r.first = Vec::new();
+                                            r.next_body_idx = r.bodies.len();
+                                        } else {
+                                            if let Some((_, env)) = sub_res.first() {
+                                                r.current_env = env.clone();
+                                                base_env = env.clone();
+                                            }
                                         }
                                     }
                                     VmExit::YieldCall { .. } => unreachable!(),
@@ -1834,6 +1860,7 @@ fn run_vm_inner(
                             bodies: bodies.clone(),
                             next_body_idx: 0,
                             first: Vec::new(),
+                            current_env: base_env.clone(),
                             free_vars_map: free_vars_map.clone(),
                         },
                     };
@@ -1848,8 +1875,9 @@ fn run_vm_inner(
                             &state.free_vars_bindings,
                         );
                         sub_state.locals = state.locals.clone();
+                        let env_to_pass = resume.current_env.clone();
                         state.resume_data = Some(Box::new(resume));
-                        yield_vm!(state, sub_state, base_env.clone());
+                        yield_vm!(state, sub_state, env_to_pass);
                     }
                     state.stack.push(resume.first);
                     state.ip += 1;
@@ -2209,6 +2237,232 @@ fn run_vm_inner(
                     state.stack.push(plain(vec![Atom::sym("true")]));
                     state.ip += 1;
                 }
+                Opcode::PrologImport { path } => {
+                    let _space_rs = state.stack.pop(); // space-ref consumed but unused
+                    let import_dir = funcs.import_dir.lock().unwrap().clone();
+                    let pl_path = std::path::Path::new(&path);
+                    let _resolved = if pl_path.exists() {
+                        Some(pl_path.to_path_buf())
+                    } else {
+                        let with_ext = format!("{}.pl", path);
+                        let candidates = [
+                            std::path::PathBuf::from(&with_ext),
+                            import_dir.join(&path),
+                            import_dir.join(&with_ext),
+                        ];
+                        candidates.into_iter().find(|p| p.exists())
+                    }
+                    .ok_or_else(|| {
+                        format!(
+                            "import!: cannot find Prolog file '{}' (searched CWD and '{}')",
+                            path,
+                            import_dir.display()
+                        )
+                    })?;
+                    #[cfg(feature = "prolog-bridge")]
+                    {
+                        use crate::eval::prolog::thread::{client, PrologCommand, PrologReply};
+                        let client = client().map_err(|e| e.to_string())?;
+                        match client.request(PrologCommand::Consult {
+                            path: _resolved.to_string_lossy().to_string(),
+                        }) {
+                            Ok(PrologReply::Ack) => {}
+                            Ok(PrologReply::Error(err)) => return Err(err.to_string()),
+                            Err(e) => return Err(e.to_string()),
+                            _ => return Err("Prolog consult failed".into()),
+                        }
+                        state.stack.push(plain(vec![Atom::sym("true")]));
+                        state.ip += 1;
+                    }
+                    #[cfg(not(feature = "prolog-bridge"))]
+                    {
+                        return Err("prolog-bridge feature not enabled".into());
+                    }
+                }
+                Opcode::TranslatePredicate { goal: _goal, free_vars_map: _ } => {
+                    #[cfg(feature = "prolog-bridge")]
+                    {
+                        use crate::eval::prolog::thread::{client, PrologCommand, PrologReply};
+                        let client = client().map_err(|e| e.to_string())?;
+
+                        let goal_atom_raw = crate::parser::expr_to_atom(&_goal);
+                        let goal_sexpr = goal_atom_raw.to_sexpr_string();
+                        if goal_sexpr.contains("&self") {
+                            let space_atoms = funcs.space.read().unwrap().get_atoms();
+                            let _ = client.request(PrologCommand::SyncSpace { atoms: space_atoms });
+                        }
+
+                        // Evaluate arguments of the goal expression
+                        let (head_str, evaluated_args) = match &_goal {
+                            Expr::List(items) if !items.is_empty() => {
+                                let head = match &items[0] {
+                                    Expr::Symbol(s) => s.clone(),
+                                    Expr::Str(s) => s.clone(),
+                                    other => other.to_string(),
+                                };
+                                let mut args = Vec::with_capacity(items.len() - 1);
+                                for arg_expr in &items[1..] {
+                                    let eval_res = match arg_expr {
+                                        Expr::Symbol(s) if s.starts_with('$') => {
+                                            if let Some(val) = lookup(&base_env, s) {
+                                                val
+                                            } else if let Some(pos) = state.free_vars_map.iter().position(|x| x == s) {
+                                                let fresh_sym = &state.free_vars_bindings[pos];
+                                                if let Atom::Sym(fresh_s) = fresh_sym {
+                                                    if let Some(val) = lookup(&base_env, fresh_s) {
+                                                        val
+                                                    } else {
+                                                        fresh_sym.clone()
+                                                    }
+                                                } else {
+                                                    fresh_sym.clone()
+                                                }
+                                            } else {
+                                                Atom::sym(s)
+                                            }
+                                        }
+                                        Expr::Symbol(s) => Atom::sym(s),
+                                        Expr::Str(s) => Atom::str_val(s),
+                                        Expr::Number(n) => Atom::Num(n.clone()),
+                                        Expr::List(list_items) if !list_items.is_empty() => {
+                                            let sub_head = list_items[0].clone();
+                                            let sub_args = list_items[1..].iter().cloned().collect();
+                                            let sub_res = eval_call_vm(
+                                                sub_head,
+                                                sub_args,
+                                                &base_env,
+                                                funcs,
+                                                &mut state.budget,
+                                                &state.free_vars_map,
+                                                &state.free_vars_bindings,
+                                            );
+                                            match sub_res {
+                                                Ok(mut rs) => {
+                                                    if let Some((first_atom, _)) = rs.pop() {
+                                                        first_atom
+                                                    } else {
+                                                        crate::parser::expr_to_atom(arg_expr)
+                                                    }
+                                                }
+                                                Err(_) => crate::parser::expr_to_atom(arg_expr),
+                                            }
+                                        }
+                                        _ => crate::parser::expr_to_atom(arg_expr),
+                                    };
+                                    args.push(eval_res);
+                                }
+                                (head, args)
+                            }
+                            _ => {
+                                let a = crate::parser::expr_to_atom(&_goal);
+                                (a.to_sexpr_string(), Vec::new())
+                            }
+                        };
+
+                        let evaluated_goal = if evaluated_args.is_empty() {
+                            Atom::sym(&head_str)
+                        } else {
+                            let mut list = vec![Atom::sym(&head_str)];
+                            list.extend(evaluated_args);
+                            Atom::expr(list)
+                        };
+
+                        // Gather in_bindings from base_env and state.free_vars
+                        let mut in_bindings: Vec<(String, Atom)> = Vec::new();
+                        let mut curr = base_env.clone();
+                        let mut seen = std::collections::HashSet::new();
+                        let mut todo = Vec::new();
+                        loop {
+                            match curr.inner() {
+                                crate::env::EnvNode::Empty => {
+                                    if let Some(next) = todo.pop() {
+                                        curr = next;
+                                        continue;
+                                    }
+                                    break;
+                                }
+                                crate::env::EnvNode::Cons { name, value, next } => {
+                                    if seen.insert(name.to_string()) {
+                                        in_bindings.push((name.to_string(), (**value).clone()));
+                                    }
+                                    curr = next.clone();
+                                }
+                                crate::env::EnvNode::Link { prefix, base } => {
+                                    todo.push(base.clone());
+                                    curr = prefix.clone();
+                                }
+                            }
+                        }
+                        for (idx, name) in state.free_vars_map.iter().enumerate() {
+                            if let Some(val) = state.free_vars_bindings.get(idx) {
+                                if let Atom::Sym(fresh_s) = val {
+                                    if let Some(bound_val) = lookup(&base_env, fresh_s) {
+                                        if seen.insert(name.clone()) {
+                                            in_bindings.push((name.clone(), bound_val.clone()));
+                                        }
+                                        if seen.insert(fresh_s.to_string()) {
+                                            in_bindings.push((fresh_s.to_string(), bound_val));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        match client.request(PrologCommand::Translate {
+                            goal: evaluated_goal,
+                            in_bindings,
+                        }) {
+                            Ok(PrologReply::TranslateSolutions(solutions)) => {
+                                if solutions.is_empty() {
+                                    state.stack.push(Vec::new());
+                                } else {
+                                    let mut rs: ResultSet = Vec::with_capacity(solutions.len());
+                                    for sol in solutions {
+                                        let mut env = base_env.clone();
+                                        for (vname, vval) in sol {
+                                            let is_unbound_dummy = if let Atom::Sym(ref s) = vval {
+                                                s.starts_with("$_V")
+                                            } else {
+                                                false
+                                            };
+                                            if !is_unbound_dummy {
+                                                env = env.extend(&vname, vval.clone());
+                                                for (idx, orig_name) in state.free_vars_map.iter().enumerate() {
+                                                    if orig_name == &vname {
+                                                        if let Some(Atom::Sym(fresh_s)) = state.free_vars_bindings.get(idx) {
+                                                            env = env.extend(fresh_s, vval.clone());
+                                                        }
+                                                    }
+                                                    if let Some(Atom::Sym(fresh_s)) = state.free_vars_bindings.get(idx) {
+                                                        if fresh_s.as_str() == vname.as_str() {
+                                                            env = env.extend(orig_name, vval.clone());
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        rs.push((Atom::sym("true"), env));
+                                    }
+                                    state.stack.push(rs);
+                                }
+                            }
+                            Ok(PrologReply::Error(err)) => {
+                                return Err(err.to_string());
+                            }
+                            Err(e) => {
+                                return Err(e.to_string());
+                            }
+                            _ => {
+                                state.stack.push(Vec::new());
+                            }
+                        }
+                        state.ip += 1;
+                    }
+                    #[cfg(not(feature = "prolog-bridge"))]
+                    {
+                        return Err("prolog-bridge feature not enabled".into());
+                    }
+                }
                 Opcode::PyCall { expr } => {
                     // Direct VM opcode for py-call — bypasses dispatch.rs entirely.
                     let result =
@@ -2267,6 +2521,7 @@ fn run_vm_inner(
                         .unwrap_or_else(|| Atom::sym("&self"));
 
                     let is_py = path.ends_with(".py");
+                    let is_pl = path.ends_with(".pl");
                     if is_py {
                         let import_dir = funcs.import_dir.lock().unwrap().clone();
                         let py_path = std::path::Path::new(path.as_ref());
@@ -2300,6 +2555,54 @@ fn run_vm_inner(
                         })?;
                         eval_py_import_library(&resolved)?;
                         state.stack.push(plain(vec![Atom::sym("true")]));
+                    } else if is_pl {
+                        let import_dir = funcs.import_dir.lock().unwrap().clone();
+                        let bases = [
+                            std::path::PathBuf::from("."),
+                            import_dir.clone(),
+                            std::path::PathBuf::from("lib"),
+                            import_dir.join("../lib"),
+                            import_dir.join("lib"),
+                        ];
+                        let with_ext = format!("{}.pl", path);
+                        let mut _resolved = None;
+                        for base in &bases {
+                            let cand1 = base.join(path.as_ref());
+                            if cand1.exists() {
+                                _resolved = Some(cand1);
+                                break;
+                            }
+                            let cand2 = base.join(&with_ext);
+                            if cand2.exists() {
+                                _resolved = Some(cand2);
+                                break;
+                            }
+                        }
+                        let _resolved = _resolved.ok_or_else(|| {
+                            format!(
+                                "import!: cannot find Prolog file '{}' (searched CWD and '{}')",
+                                path,
+                                import_dir.display()
+                            )
+                        })?;
+                        #[cfg(feature = "prolog-bridge")]
+                        {
+                            use crate::eval::prolog::thread::{client, PrologCommand, PrologReply};
+                            let client = client().map_err(|e| e.to_string())?;
+                            match client.request(PrologCommand::Consult {
+                                path: _resolved.to_string_lossy().to_string(),
+                            }) {
+                                Ok(PrologReply::Ack) => {}
+                                Ok(PrologReply::Error(err)) => return Err(err.to_string()),
+                                Err(e) => return Err(e.to_string()),
+                                _ => return Err("Prolog consult failed".into()),
+                            }
+                            state.stack.push(plain(vec![Atom::sym("true")]));
+                        }
+                        #[cfg(not(feature = "prolog-bridge"))]
+                        {
+                            return Err("prolog-bridge feature not enabled".into());
+                        }
                     } else {
                         let import_dir = funcs.import_dir.lock().unwrap().clone();
                         let resolved =
@@ -2774,7 +3077,14 @@ fn run_vm_inner(
                         results.extend(sub_results);
                     }
                     CallFrameKind::Case { results, .. } => {
-                        results.extend(sub_results);
+                        let merged: Vec<(Atom, Env)> = sub_results
+                            .into_iter()
+                            .map(|(atom, env)| {
+                                let merged_env = prepend_chain(env, &base_env);
+                                (atom, merged_env)
+                            })
+                            .collect();
+                        results.extend(merged);
                     }
                     CallFrameKind::Call { results, .. } => {
                         let merged: Vec<(Atom, Env)> = sub_results
@@ -3529,6 +3839,8 @@ fn body_has_side_effect(body_code: &[Opcode]) -> bool {
             Opcode::AddAtom { .. }
                 | Opcode::RemAtom { .. }
                 | Opcode::PythonImport { .. }
+                | Opcode::PrologImport { .. }
+                | Opcode::TranslatePredicate { .. }
                 | Opcode::ImportDynamic
                 | Opcode::Println
                 | Opcode::Readln

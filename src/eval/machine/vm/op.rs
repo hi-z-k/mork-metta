@@ -166,6 +166,15 @@ pub enum Opcode {
     PythonImport {
         path: String,
     },
+    /// Pops space-ref from stack (ignored), consults a .pl library file via SWI-Prolog.
+    PrologImport {
+        path: String,
+    },
+    /// Executes a Prolog goal via translatePredicate, marshaling variables in/out of the environment.
+    TranslatePredicate {
+        goal: Expr,
+        free_vars_map: Arc<[String]>,
+    },
     /// Evaluates a `(py-call expr)` — raw expression tree, not evaluated args.
     /// Bypasses dispatch.rs string matching and CEK machine entirely.
     PyCall {
