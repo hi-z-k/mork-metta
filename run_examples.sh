@@ -37,6 +37,11 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
+SWIPL_AVAILABLE=1
+if ! command -v swipl &>/dev/null; then
+	SWIPL_AVAILABLE=0
+fi
+
 should_skip() {
 	local file="$1"
 	local base
@@ -46,6 +51,13 @@ should_skip() {
 			return 0
 		fi
 	done
+	if [[ "$SWIPL_AVAILABLE" -eq 0 ]]; then
+		case "$base" in
+			*prolog*|translatepredicate|spaces_succeedspredicate|tabling_fib)
+				return 0
+				;;
+		esac
+	fi
 	return 1
 }
 
