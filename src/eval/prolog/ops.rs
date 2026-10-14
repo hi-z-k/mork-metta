@@ -607,20 +607,15 @@ pub fn sync_space(
 
         let frame = (api.open_foreign_frame)();
 
-        // 1. Retractall '&self'(...)
-        let c_code = CString::new(r#"
-retractall('&self'(_)),
-retractall('&self'(_,_)),
-retractall('&self'(_,_,_)),
-retractall('&self'(_,_,_,_)),
-retractall('&self'(_,_,_,_,_)),
-retractall('&self'(_,_,_,_,_,_)),
-retractall('&self'(_,_,_,_,_,_,_)),
-retractall('&self'(_,_,_,_,_,_,_,_)).
-"#).unwrap();
-        let mut term = (api.new_term_ref)();
+        // 1. Retract all arities of '&self' dynamically
+        let c_code = CString::new(
+            "forall(current_predicate('&self'/A), (functor(H, '&self', A), retractall(H)))."
+        ).unwrap();
+        let term = (api.new_term_ref)();
         (api.chars_to_term)(c_code.as_ptr(), term);
-        (api.call)(term, 0);
+        let user_atom = (api.new_atom)(b"user\0".as_ptr() as *const _);
+        let user_mod = (api.new_module)(user_atom);
+        (api.call)(term, user_mod);
 
         // 2. Assert each atom as '&self'(args...)
         for atom in atoms {

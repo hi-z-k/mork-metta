@@ -2288,8 +2288,12 @@ fn run_vm_inner(
                         let goal_atom_raw = crate::parser::expr_to_atom(&_goal);
                         let goal_sexpr = goal_atom_raw.to_sexpr_string();
                         if goal_sexpr.contains("&self") {
-                            let space_atoms = funcs.space.read().unwrap().get_atoms();
-                            let _ = client.request(PrologCommand::SyncSpace { atoms: space_atoms });
+                            static LAST_SYNCED_STAMP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
+                            let current_stamp = funcs.memo_stamp.load(std::sync::atomic::Ordering::Relaxed);
+                            if LAST_SYNCED_STAMP.swap(current_stamp, std::sync::atomic::Ordering::Relaxed) != current_stamp {
+                                let space_atoms = funcs.space.read().unwrap().get_atoms();
+                                let _ = client.request(PrologCommand::SyncSpace { atoms: space_atoms });
+                            }
                         }
 
                         // Substitute bound variables into the goal expression without eager function evaluation
