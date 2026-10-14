@@ -3,6 +3,7 @@ use crate::eval::shared::{closure::lazy_user_arg_mask, fresh::contains_fresh_var
 use crate::parser::Expr;
 use crate::space::{MorkSpace, Space};
 use rustc_hash::FxHashMap as HashMap;
+use rustc_hash::FxHashSet as HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 /// Function dispatch table.
@@ -32,6 +33,9 @@ pub enum NDet {
 impl NDet {
     pub fn single(atom: Atom) -> Self {
         NDet::Single(Some(atom))
+    }
+    pub fn empty() -> Self {
+        NDet::Single(None)
     }
     pub fn stream(iter: impl Iterator<Item = Atom> + Send + 'static) -> Self {
         NDet::Stream(Box::new(iter))
@@ -138,6 +142,10 @@ pub struct FnTable {
     /// Lazy-arg mask cache: (name, arity) → Vec<bool>. Populated on first call,
     /// invalidated on cache_fn (add-atom / redefinition).
     pub lazy_mask_cache: RwLock<HashMap<(String, u8), Vec<bool>>>,
+    /// Track function names imported from Prolog for dynamic arity resolution.
+    pub imported_prolog_funcs: RwLock<HashSet<String>>,
+    /// Track function names registered as translator rules (syntactic macros).
+    pub translator_rules: RwLock<HashSet<String>>,
 }
 
 impl FnTable {
@@ -153,6 +161,8 @@ impl FnTable {
             memo_stamp: AtomicU64::new(0),
             memo_cache: RwLock::new(HashMap::default()),
             lazy_mask_cache: RwLock::new(HashMap::default()),
+            imported_prolog_funcs: RwLock::new(HashSet::default()),
+            translator_rules: RwLock::new(HashSet::default()),
         }
     }
 
@@ -168,7 +178,16 @@ impl FnTable {
             memo_stamp: AtomicU64::new(0),
             memo_cache: RwLock::new(HashMap::default()),
             lazy_mask_cache: RwLock::new(HashMap::default()),
+            imported_prolog_funcs: RwLock::new(HashSet::default()),
+            translator_rules: RwLock::new(HashSet::default()),
         }
+    }
+
+    /// Invalidate memo cache and lazy-arg mask cache, bumping memo stamp.
+    pub fn invalidate_caches(&self) {
+        self.bump_memo_stamp();
+        self.memo_cache.write().unwrap().clear();
+        self.lazy_mask_cache.write().unwrap().clear();
     }
 
     pub fn insert_native<F>(&self, name: &str, arity: u8, func: F)

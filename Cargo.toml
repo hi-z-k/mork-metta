@@ -10,6 +10,7 @@
     profile = []
     python-bridge = ["dep:pyo3"]
     plugins = ["dep:libloading"]
+    prolog-bridge = ["dep:libloading"]
 [dependencies]
     mork = { git = "https://github.com/iCog-Labs-Dev/MORK", branch = "chore/cleanup" }
     mork-expr = { git = "https://github.com/iCog-Labs-Dev/MORK", branch = "chore/cleanup" }

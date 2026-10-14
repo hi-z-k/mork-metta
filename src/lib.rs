@@ -22,6 +22,16 @@ use crate::func::FnTable;
 use crate::parser::{Expr, TopForm, expr_to_atom, parse_forms};
 use crate::space::Space;
 
+#[cfg(feature = "prolog-bridge")]
+pub fn prolog_available() -> bool {
+    crate::eval::prolog::ffi::Api::get().is_ok()
+}
+
+#[cfg(not(feature = "prolog-bridge"))]
+pub fn prolog_available() -> bool {
+    false
+}
+
 pub struct Runtime {
     pub funcs: FnTable,
 }
