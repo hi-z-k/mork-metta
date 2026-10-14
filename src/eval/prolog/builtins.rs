@@ -40,6 +40,26 @@ pub fn register_prolog_builtins(funcs: &FnTable) {
         }
     });
 
+    // (succeedsPredicate G) -> True if at least one solution, False on failure (boolean for `if`)
+    funcs.insert_native("succeedsPredicate", 1, |args, _| {
+        expect_n_args(args, 1, "succeedsPredicate")?;
+        let client = client().map_err(|e| e.to_string())?;
+        match client.request(PrologCommand::CallPredicate {
+            goal: args[0].clone(),
+        }) {
+            Ok(PrologReply::Solutions(solutions)) => {
+                if solutions.is_empty() {
+                    Ok(NDet::single(Atom::sym("False")))
+                } else {
+                    Ok(NDet::single(Atom::sym("True")))
+                }
+            }
+            Ok(PrologReply::Error(e)) => Err(e.to_string()),
+            Err(e) => Err(e.to_string()),
+            _ => Ok(NDet::single(Atom::sym("False"))),
+        }
+    });
+
     // (assertaPredicate G) -> True
     funcs.insert_native("assertaPredicate", 1, |args, _| {
         expect_n_args(args, 1, "assertaPredicate")?;

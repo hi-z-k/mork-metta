@@ -264,6 +264,12 @@ mod tests {
 
         let res = rt.eval_str("!(callPredicate (Predicate (fail)))").unwrap();
         assert_eq!(res, None);
+
+        let res = rt.eval_str("!(if (succeedsPredicate (Predicate (true))) Yes No)").unwrap();
+        assert_eq!(res.map(|a| a.to_sexpr_string()), Some("Yes".to_string()));
+
+        let res = rt.eval_str("!(if (succeedsPredicate (Predicate (fail))) Yes No)").unwrap();
+        assert_eq!(res.map(|a| a.to_sexpr_string()), Some("No".to_string()));
     }
 
     #[test]
