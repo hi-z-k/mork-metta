@@ -2292,24 +2292,22 @@ fn run_vm_inner(
                             let _ = client.request(PrologCommand::SyncSpace { atoms: space_atoms });
                         }
 
-                        // Evaluate arguments of the goal expression
-                        let (head_str, evaluated_args) = match &_goal {
-                            Expr::List(items) if !items.is_empty() => {
-                                let head = match &items[0] {
-                                    Expr::Symbol(s) => s.clone(),
-                                    Expr::Str(s) => s.clone(),
-                                    other => other.to_string(),
-                                };
-                                let mut args = Vec::with_capacity(items.len() - 1);
-                                for arg_expr in &items[1..] {
-                                    let eval_res = match arg_expr {
-                                        Expr::Symbol(s) if s.starts_with('$') => {
-                                            if let Some(val) = lookup(&base_env, s) {
-                                                val
-                                            } else if let Some(pos) = state.free_vars_map.iter().position(|x| x == s) {
-                                                let fresh_sym = &state.free_vars_bindings[pos];
+                        // Substitute bound variables into the goal expression without eager function evaluation
+                        let subst_expr = |expr: &Expr| -> Atom {
+                            fn rec(
+                                e: &Expr,
+                                env: &Env,
+                                fv_map: &[String],
+                                fv_bind: &[Atom],
+                            ) -> Atom {
+                                match e {
+                                    Expr::Symbol(s) if s.starts_with('$') => {
+                                        if let Some(val) = lookup(env, s) {
+                                            val
+                                        } else if let Some(pos) = fv_map.iter().position(|x| x == s) {
+                                            if let Some(fresh_sym) = fv_bind.get(pos) {
                                                 if let Atom::Sym(fresh_s) = fresh_sym {
-                                                    if let Some(val) = lookup(&base_env, fresh_s) {
+                                                    if let Some(val) = lookup(env, fresh_s) {
                                                         val
                                                     } else {
                                                         fresh_sym.clone()
@@ -2320,41 +2318,37 @@ fn run_vm_inner(
                                             } else {
                                                 Atom::sym(s)
                                             }
+                                        } else {
+                                            Atom::sym(s)
                                         }
-                                        Expr::Symbol(s) => Atom::sym(s),
-                                        Expr::Str(s) => Atom::str_val(s),
-                                        Expr::Number(n) => Atom::Num(n.clone()),
-                                        Expr::List(list_items) if !list_items.is_empty() => {
-                                            let sub_head = list_items[0].clone();
-                                            let sub_args = list_items[1..].iter().cloned().collect();
-                                            let sub_res = eval_call_vm(
-                                                sub_head,
-                                                sub_args,
-                                                &base_env,
-                                                funcs,
-                                                &mut state.budget,
-                                                &state.free_vars_map,
-                                                &state.free_vars_bindings,
-                                            );
-                                            match sub_res {
-                                                Ok(mut rs) => {
-                                                    if let Some((first_atom, _)) = rs.pop() {
-                                                        first_atom
-                                                    } else {
-                                                        crate::parser::expr_to_atom(arg_expr)
-                                                    }
-                                                }
-                                                Err(_) => crate::parser::expr_to_atom(arg_expr),
-                                            }
-                                        }
-                                        _ => crate::parser::expr_to_atom(arg_expr),
-                                    };
-                                    args.push(eval_res);
+                                    }
+                                    Expr::Symbol(s) => Atom::sym(s),
+                                    Expr::Str(s) => Atom::str_val(s),
+                                    Expr::Number(n) => Atom::Num(n.clone()),
+                                    Expr::List(items) => {
+                                        let atom_items: Vec<Atom> = items
+                                            .iter()
+                                            .map(|item| rec(item, env, fv_map, fv_bind))
+                                            .collect();
+                                        Atom::expr(atom_items)
+                                    }
                                 }
+                            }
+                            rec(expr, &base_env, &state.free_vars_map, &state.free_vars_bindings)
+                        };
+
+                        let (head_str, evaluated_args) = match &_goal {
+                            Expr::List(items) if !items.is_empty() => {
+                                let head = match &items[0] {
+                                    Expr::Symbol(s) => s.clone(),
+                                    Expr::Str(s) => s.clone(),
+                                    other => other.to_string(),
+                                };
+                                let args: Vec<Atom> = items[1..].iter().map(|arg| subst_expr(arg)).collect();
                                 (head, args)
                             }
                             _ => {
-                                let a = crate::parser::expr_to_atom(&_goal);
+                                let a = subst_expr(&_goal);
                                 (a.to_sexpr_string(), Vec::new())
                             }
                         };
