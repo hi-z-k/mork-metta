@@ -68,7 +68,7 @@ Run any `.metta` file directly with `cargo run`:
 cargo run -- <file.metta>
 
 # Run with Prolog bridge feature enabled
-cargo run --features prolog-bridge -- examples/prolog_lib_import.metta
+cargo run --features prolog-bridge -- examples/prolog_lib_zar.metta
 ```
 
 ---
