@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::ffi::CString;
 
-use crate::atom::{Atom, Grounded, Numeric};
+use crate::atom::{Atom, Numeric};
 use crate::eval::prolog::error::PrologError;
 use crate::eval::prolog::ffi::{Api, term_t};
 use crate::eval::prolog::handle::PrologForeign;
