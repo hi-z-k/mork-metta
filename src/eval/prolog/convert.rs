@@ -79,6 +79,12 @@ pub fn atom_to_term(
             if expr_data.len() == 2 && expr_data[0].as_sym().map(|s| s == "library").unwrap_or(false) {
                 return compound_to_term(api, "library", vec![&expr_data[1]], var_map);
             }
+            if let Some(Atom::Sym(head)) = expr_data.first() {
+                if is_prolog_operator(head.as_str()) {
+                    let args: Vec<&Atom> = expr_data[1..].iter().collect();
+                    return compound_to_term(api, head.as_str(), args, var_map);
+                }
+            }
             return list_to_term(api, expr_data.as_ref(), var_map);
         }
         Atom::Gnd(g) => {
@@ -129,6 +135,17 @@ pub fn goal_to_term(
         }
     }
     atom_to_term(goal, api, var_map)
+}
+
+/// Returns true if symbol `s` is a standard Prolog operator/functor.
+pub fn is_prolog_operator(s: &str) -> bool {
+    matches!(
+        s,
+        "+" | "-" | "*" | "/" | "mod" | "rem" | "abs" | "min" | "max"
+            | "sqrt" | "**" | "^" | "div" | "rdiv"
+            | "=" | "\\=" | "<" | ">" | "=<" | ">=" | "=:=" | "=\\="
+            | ":-" | "?-" | "," | ";" | "->" | "*->" | "\\+" | "not"
+    )
 }
 
 /// Extract a `(Predicate (f args...))` or `(Compound f args...)` compound from an expression.
