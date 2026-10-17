@@ -322,11 +322,7 @@ impl VMCompiler {
                             };
                             let mut pattern_vars = Vec::new();
                             collect_pattern_vars(&items[1], &mut pattern_vars);
-                            let seed_vars: Vec<String> = pattern_vars
-                                .iter()
-                                .filter(|v| self.locals.contains(v))
-                                .cloned()
-                                .collect();
+                            let seed_vars: Vec<String> = pattern_vars.iter().filter(|v| self.locals.contains(v)).cloned().collect();
                             body_comp.locals.extend(pattern_vars.clone());
 
                             let mut body_code = Vec::new();
@@ -693,7 +689,6 @@ impl VMCompiler {
                             // path is always a compile-time literal; compile space-ref arg only
                             // Performance: avoids a full CEK round-trip just to eval &self
                             let path_opcode = match &items[2] {
-                                // (library path.py) — Python import, (library path.pl) — Prolog import
                                 Expr::List(lib) if lib.len() == 2 => {
                                     if let (Expr::Symbol(head), Expr::Symbol(p) | Expr::Str(p)) =
                                         (&lib[0], &lib[1])
@@ -709,16 +704,9 @@ impl VMCompiler {
                                                 if dirs.iter().any(|d| d.join(format!("{p}.metta")).exists()) {
                                                     Some(Opcode::ImportFile { path: p.clone() })
                                                 } else {
-                                                    let pl = format!("{p}.pl");
-                                                    let py = format!("{p}.py");
+                                                    let (pl, py) = (format!("{p}.pl"), format!("{p}.py"));
                                                     let ext = dirs.iter().find_map(|d| {
-                                                        if d.join(&pl).exists() {
-                                                            Some(true)
-                                                        } else if d.join(&py).exists() {
-                                                            Some(false)
-                                                        } else {
-                                                            None
-                                                        }
+                                                        if d.join(&pl).exists() { Some(true) } else if d.join(&py).exists() { Some(false) } else { None }
                                                     });
                                                     match ext {
                                                         Some(true) => Some(Opcode::PrologImport { path: pl }),
@@ -864,24 +852,16 @@ impl VMCompiler {
                             let mut goal_vars = Vec::new();
                             collect_pattern_vars(&items[1], &mut goal_vars);
                             for v in &goal_vars {
-                                if !self.locals.contains(v) && !self.free_vars.contains(v) {
-                                    self.free_vars.push(v.clone());
-                                }
+                                if !self.locals.contains(v) && !self.free_vars.contains(v) { self.free_vars.push(v.clone()); }
                             }
                             let (head, nargs) = match &items[1] {
                                 Expr::List(g) if !g.is_empty() => {
-                                    for arg in &g[1..] {
-                                        self.compile(arg, code, false)?;
-                                    }
+                                    for arg in &g[1..] { self.compile(arg, code, false)?; }
                                     (g[0].clone(), (g.len() - 1) as u8)
                                 }
                                 other => (other.clone(), 0),
                             };
-                            code.push(Opcode::TranslatePredicate {
-                                head,
-                                nargs,
-                                free_vars_map: std::sync::Arc::from(self.free_vars.clone()),
-                            });
+                            code.push(Opcode::TranslatePredicate { head, nargs, free_vars_map: std::sync::Arc::from(self.free_vars.clone()) });
                             return Ok(());
                         }
                         _ => {}
@@ -1015,11 +995,7 @@ impl VMCompiler {
         };
         let mut pattern_vars = Vec::new();
         collect_pattern_vars(pattern, &mut pattern_vars);
-        let seed_vars: Vec<String> = pattern_vars
-            .iter()
-            .filter(|v| self.locals.contains(v))
-            .cloned()
-            .collect();
+        let seed_vars: Vec<String> = pattern_vars.iter().filter(|v| self.locals.contains(v)).cloned().collect();
         body_comp.locals.extend(pattern_vars.clone());
 
         let mut body_code = Vec::new();
@@ -1100,24 +1076,15 @@ fn match_expr_pattern(
 ) -> bool {
     match (pattern, arg) {
         (Expr::Symbol(s), _) if s.starts_with('$') => {
-            if let Some(existing) = subst.get(s) {
-                existing == arg
-            } else {
-                subst.insert(s.clone(), arg.clone());
-                true
-            }
+            if let Some(existing) = subst.get(s) { existing == arg } else { subst.insert(s.clone(), arg.clone()); true }
         }
         (Expr::Symbol(s1), Expr::Symbol(s2)) => s1 == s2,
         (Expr::Str(s1), Expr::Str(s2)) => s1 == s2,
         (Expr::Number(n1), Expr::Number(n2)) => n1 == n2,
         (Expr::List(p_items), Expr::List(a_items)) => {
-            if p_items.len() != a_items.len() {
-                return false;
-            }
+            if p_items.len() != a_items.len() { return false; }
             for (p, a) in p_items.iter().zip(a_items.iter()) {
-                if !match_expr_pattern(p, a, subst) {
-                    return false;
-                }
+                if !match_expr_pattern(p, a, subst) { return false; }
             }
             true
         }
@@ -1131,11 +1098,7 @@ fn subst_expr_template(
 ) -> Expr {
     match template {
         Expr::Symbol(s) if s.starts_with('$') => {
-            if let Some(replacement) = subst.get(s) {
-                replacement.clone()
-            } else {
-                template.clone()
-            }
+            if let Some(replacement) = subst.get(s) { replacement.clone() } else { template.clone() }
         }
         Expr::List(items) => {
             Expr::List(items.iter().map(|item| subst_expr_template(item, subst)).collect())

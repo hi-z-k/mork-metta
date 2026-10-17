@@ -44,11 +44,7 @@ pub fn atom_to_term(atom: &Atom, api: &Api, var_map: &mut VarMap) -> Result<term
             if name.starts_with('$') {
                 return Ok(match var_map.get(name) {
                     Some(&t) => t,
-                    None => {
-                        unsafe { api.put_variable(term) };
-                        var_map.insert(name.to_string(), term);
-                        term
-                    }
+                    None => { unsafe { api.put_variable(term) }; var_map.insert(name.to_string(), term); term }
                 });
             }
             unsafe { api.put_atom(term, api.new_atom(CString::new(name)?.as_ptr())) };
@@ -57,9 +53,8 @@ pub fn atom_to_term(atom: &Atom, api: &Api, var_map: &mut VarMap) -> Result<term
             unsafe { api.put_string_chars(term, CString::new(s.as_ref())?.as_ptr()) };
         }
         Atom::Num(Numeric::Int(i)) => {
-            if let Ok(v) = i64::try_from(i) {
-                unsafe { api.put_int64(term, v) };
-            } else {
+            if let Ok(v) = i64::try_from(i) { unsafe { api.put_int64(term, v) }; }
+            else {
                 let c_s = CString::new(i.to_string())?;
                 if unsafe { api.chars_to_term(c_s.as_ptr(), term) } == 0 {
                     return Err(PrologError::Conversion("failed to parse big int".into()));
@@ -140,8 +135,7 @@ fn extract_predicate_compound<'a>(items: &'a [Atom]) -> Option<(&'a str, Vec<&'a
 }
 
 fn build_compound(api: &Api, head: &str, arg_terms: &[term_t]) -> Result<term_t, PrologError> {
-    let head_atom = unsafe { api.new_atom(CString::new(head)?.as_ptr()) };
-    let term = unsafe { api.new_term_ref() };
+    let (head_atom, term) = unsafe { (api.new_atom(CString::new(head)?.as_ptr()), api.new_term_ref()) };
     if arg_terms.is_empty() {
         unsafe { api.put_atom(term, head_atom) };
         return Ok(term);
@@ -214,8 +208,7 @@ pub fn term_to_atom(
         PL_NIL => Ok(Atom::expr(vec![])),
         PL_LIST_PAIR => {
             let mut elements = Vec::new();
-            let head = unsafe { api.new_term_ref() };
-            let tail = unsafe { api.new_term_ref() };
+            let (head, tail) = unsafe { (api.new_term_ref(), api.new_term_ref()) };
             let mut current = term;
             while unsafe { api.term_type(current) } == PL_LIST_PAIR {
                 if unsafe { api.get_list(current, head, tail) } == 0 { break; }
@@ -228,8 +221,7 @@ pub fn term_to_atom(
             Ok(Atom::expr(elements))
         }
         PL_TERM => {
-            let mut name_atom: atom_t = 0;
-            let mut arity: c_int = 0;
+            let (mut name_atom, mut arity): (atom_t, c_int) = (0, 0);
             if unsafe { api.get_name_arity(term, &mut name_atom, &mut arity) } == 0 {
                 return Err(PrologError::Conversion("failed to get functor name and arity".into()));
             }

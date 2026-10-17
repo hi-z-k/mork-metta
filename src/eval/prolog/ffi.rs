@@ -41,46 +41,26 @@ macro_rules! swipl {
 }
 
 swipl! {
-    initialise = "PL_initialise"(argc: c_int, argv: *mut *mut c_char) -> c_int;
-    create_engine = "PL_create_engine"(attr: *mut c_void) -> PL_engine_t;
-    destroy_engine = "PL_destroy_engine"(engine: PL_engine_t) -> c_int;
-    set_engine = "PL_set_engine"(engine: PL_engine_t, old: *mut PL_engine_t) -> c_int;
-    open_foreign_frame = "PL_open_foreign_frame"() -> fid_t;
-    discard_foreign_frame = "PL_discard_foreign_frame"(fid: fid_t) -> ();
-    clear_exception = "PL_clear_exception"() -> ();
-    new_term_ref = "PL_new_term_ref"() -> term_t;
-    new_term_refs = "PL_new_term_refs"(n: c_int) -> term_t;
-    put_atom = "PL_put_atom"(t: term_t, a: atom_t) -> c_int;
-    put_atom_chars = "PL_put_atom_chars"(t: term_t, s: *const c_char) -> c_int;
-    put_string_chars = "PL_put_string_chars"(t: term_t, s: *const c_char) -> c_int;
-    put_int64 = "PL_put_int64"(t: term_t, v: i64) -> c_int;
-    put_float = "PL_put_float"(t: term_t, v: f64) -> c_int;
-    put_nil = "PL_put_nil"(t: term_t) -> c_int;
-    put_variable = "PL_put_variable"(t: term_t) -> c_int;
-    put_term = "PL_put_term"(t: term_t, from: term_t) -> c_int;
-    get_chars = "PL_get_chars"(t: term_t, s: *mut *const c_char, flags: c_uint) -> c_int;
-    get_int64 = "PL_get_int64"(t: term_t, v: *mut i64) -> c_int;
-    get_float = "PL_get_float"(t: term_t, v: *mut f64) -> c_int;
-    get_arg = "PL_get_arg"(index: c_int, t: term_t, a: term_t) -> c_int;
-    get_name_arity = "PL_get_name_arity"(t: term_t, name: *mut atom_t, arity: *mut c_int) -> c_int;
-    get_list = "PL_get_list"(t: term_t, head: term_t, tail: term_t) -> c_int;
-    new_functor = "PL_new_functor"(a: atom_t, arity: c_int) -> functor_t;
-    new_functor_sz = "PL_new_functor_sz"(a: atom_t, arity: usize) -> functor_t;
-    new_atom = "PL_new_atom"(s: *const c_char) -> atom_t;
-    atom_chars = "PL_atom_chars"(a: atom_t) -> *const c_char;
-    predicate = "PL_predicate"(name: *const c_char, arity: c_int, module: *const c_char) -> predicate_t;
-    new_module = "PL_new_module"(name: atom_t) -> module_t;
-    open_query = "PL_open_query"(module: module_t, flags: c_int, pred: predicate_t, args: term_t) -> qid_t;
-    next_solution = "PL_next_solution"(qid: qid_t) -> c_int;
-    cut_query = "PL_cut_query"(qid: qid_t) -> c_int;
-    close_query = "PL_close_query"(qid: qid_t) -> c_int;
-    record = "PL_record"(t: term_t) -> record_t;
-    recorded = "PL_recorded"(r: record_t, t: term_t) -> c_int;
-    exception = "PL_exception"(qid: qid_t) -> term_t;
-    chars_to_term = "PL_chars_to_term"(s: *const c_char, t: term_t) -> c_int;
-    call = "PL_call"(t: term_t, module: module_t) -> c_int;
-    term_type = "PL_term_type"(t: term_t) -> c_int;
-    cons_functor_v = "PL_cons_functor_v"(t: term_t, f: functor_t, args: term_t) -> c_int;
+    initialise = "PL_initialise"(argc: c_int, argv: *mut *mut c_char) -> c_int; create_engine = "PL_create_engine"(attr: *mut c_void) -> PL_engine_t;
+    destroy_engine = "PL_destroy_engine"(engine: PL_engine_t) -> c_int; set_engine = "PL_set_engine"(engine: PL_engine_t, old: *mut PL_engine_t) -> c_int;
+    open_foreign_frame = "PL_open_foreign_frame"() -> fid_t; discard_foreign_frame = "PL_discard_foreign_frame"(fid: fid_t) -> ();
+    clear_exception = "PL_clear_exception"() -> (); new_term_ref = "PL_new_term_ref"() -> term_t;
+    new_term_refs = "PL_new_term_refs"(n: c_int) -> term_t; put_atom = "PL_put_atom"(t: term_t, a: atom_t) -> c_int;
+    put_atom_chars = "PL_put_atom_chars"(t: term_t, s: *const c_char) -> c_int; put_string_chars = "PL_put_string_chars"(t: term_t, s: *const c_char) -> c_int;
+    put_int64 = "PL_put_int64"(t: term_t, v: i64) -> c_int; put_float = "PL_put_float"(t: term_t, v: f64) -> c_int;
+    put_nil = "PL_put_nil"(t: term_t) -> c_int; put_variable = "PL_put_variable"(t: term_t) -> c_int;
+    put_term = "PL_put_term"(t: term_t, from: term_t) -> c_int; get_chars = "PL_get_chars"(t: term_t, s: *mut *const c_char, flags: c_uint) -> c_int;
+    get_int64 = "PL_get_int64"(t: term_t, v: *mut i64) -> c_int; get_float = "PL_get_float"(t: term_t, v: *mut f64) -> c_int;
+    get_arg = "PL_get_arg"(index: c_int, t: term_t, a: term_t) -> c_int; get_name_arity = "PL_get_name_arity"(t: term_t, name: *mut atom_t, arity: *mut c_int) -> c_int;
+    get_list = "PL_get_list"(t: term_t, head: term_t, tail: term_t) -> c_int; new_functor = "PL_new_functor"(a: atom_t, arity: c_int) -> functor_t;
+    new_functor_sz = "PL_new_functor_sz"(a: atom_t, arity: usize) -> functor_t; new_atom = "PL_new_atom"(s: *const c_char) -> atom_t;
+    atom_chars = "PL_atom_chars"(a: atom_t) -> *const c_char; predicate = "PL_predicate"(name: *const c_char, arity: c_int, module: *const c_char) -> predicate_t;
+    new_module = "PL_new_module"(name: atom_t) -> module_t; open_query = "PL_open_query"(module: module_t, flags: c_int, pred: predicate_t, args: term_t) -> qid_t;
+    next_solution = "PL_next_solution"(qid: qid_t) -> c_int; cut_query = "PL_cut_query"(qid: qid_t) -> c_int;
+    close_query = "PL_close_query"(qid: qid_t) -> c_int; record = "PL_record"(t: term_t) -> record_t;
+    recorded = "PL_recorded"(r: record_t, t: term_t) -> c_int; exception = "PL_exception"(qid: qid_t) -> term_t;
+    chars_to_term = "PL_chars_to_term"(s: *const c_char, t: term_t) -> c_int; call = "PL_call"(t: term_t, module: module_t) -> c_int;
+    term_type = "PL_term_type"(t: term_t) -> c_int; cons_functor_v = "PL_cons_functor_v"(t: term_t, f: functor_t, args: term_t) -> c_int;
     cons_list = "PL_cons_list"(t: term_t, head: term_t, tail: term_t) -> c_int;
 }
 

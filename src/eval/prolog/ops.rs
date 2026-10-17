@@ -73,12 +73,7 @@ fn run_once(api: &Api, name: &[u8], arity: c_int, args: term_t, flags: c_int) ->
 }
 
 fn with_main_frame<R>(f: impl FnOnce(&Api) -> Result<R, PrologError>) -> Result<R, PrologError> {
-    engine::manager()?.with_main(|api| {
-        let frame = unsafe { api.open_foreign_frame() };
-        let result = f(api);
-        unsafe { api.discard_foreign_frame(frame) };
-        result
-    })?
+    engine::manager()?.with_main(|api| { let frame = unsafe { api.open_foreign_frame() }; let result = f(api); unsafe { api.discard_foreign_frame(frame) }; result })?
 }
 
 pub fn init_support(manager: &Arc<EngineManager>) -> Result<(), PrologError> {
@@ -104,8 +99,7 @@ pub fn load_prolog_code(manager: &Arc<EngineManager>, code: &str) -> Result<(), 
     manager.with_main(|api| -> Result<(), PrologError> {
         unsafe {
             let frame = api.open_foreign_frame();
-            let sargs = api.new_term_refs(2);
-            let c_code = CString::new(code)?;
+            let (sargs, c_code) = (api.new_term_refs(2), CString::new(code)?);
             api.put_string_chars(sargs, c_code.as_ptr());
             let q = api.open_query(0, PL_Q_NORMAL, sys_pred(api, b"open_string\0", 2), sargs);
             if q == 0 || api.next_solution(q) == 0 {
@@ -117,8 +111,7 @@ pub fn load_prolog_code(manager: &Arc<EngineManager>, code: &str) -> Result<(), 
             let lf_args = api.new_term_refs(2);
             api.put_atom_chars(lf_args, b"user\0".as_ptr() as *const _);
             let opt = api.new_term_ref();
-            let sa = api.new_atom(b"stream\0".as_ptr() as *const _);
-            api.cons_functor_v(opt, api.new_functor(sa, 1), sargs + 1);
+            api.cons_functor_v(opt, api.new_functor(api.new_atom(b"stream\0".as_ptr() as *const _), 1), sargs + 1);
             let opts = api.new_term_ref();
             api.put_nil(opts);
             api.cons_list(opts, opt, opts);
@@ -146,8 +139,7 @@ fn run_goal<T>(
                     let t = atom_to_term(value, api, &mut var_map)?;
                     var_map.insert(name.clone(), t);
                 }
-                let qid = open_call(api, goal_to_term(goal, api, &mut var_map)?)?;
-                let mut solutions = Vec::new();
+                let (qid, mut solutions) = (open_call(api, goal_to_term(goal, api, &mut var_map)?)?, Vec::new());
                 loop {
                     match next_solution(api, qid) {
                         StepStatus::True => solutions.push(on_solution(api, &var_map)),
@@ -181,15 +173,13 @@ pub fn call_function(functor_name: &str, args: &[Atom]) -> Result<FunctionOutcom
     let outcome = unsafe {
         let frame = api.open_foreign_frame();
         let mut var_map = VarMap::new();
-        let c_head = CString::new(functor_name)?;
-        let arity = args.len() + 1;
+        let (c_head, arity) = (CString::new(functor_name)?, args.len() + 1);
         let a0 = api.new_term_refs(arity as c_int);
         for (i, arg) in args.iter().enumerate() {
             api.put_term(a0 + i, atom_to_term(arg, api, &mut var_map)?);
         }
-        let result_term = a0 + args.len();
+        let (result_term, goal_term) = (a0 + args.len(), api.new_term_ref());
         api.put_variable(result_term);
-        let goal_term = api.new_term_ref();
         let head_atom = api.new_atom(c_head.as_ptr());
         if api.cons_functor_v(goal_term, api.new_functor_sz(head_atom, arity), a0) == 0 {
             api.discard_foreign_frame(frame);
@@ -272,8 +262,7 @@ pub fn current_arities(name: &str) -> Result<Vec<usize>, PrologError> {
             let args = api.new_term_refs(2);
             api.put_atom(args, api.new_atom(c_name.as_ptr()));
             let spec = api.new_term_ref();
-            let slash = api.new_atom(b"/\0".as_ptr() as *const _);
-            api.cons_functor_v(spec, api.new_functor(slash, 2), args);
+            api.cons_functor_v(spec, api.new_functor(api.new_atom(b"/\0".as_ptr() as *const _), 2), args);
             let user_mod = api.new_module(api.new_atom(b"user\0".as_ptr() as *const _));
             let p = sys_pred(api, b"current_predicate\0", 1);
             let q = api.open_query(user_mod, PL_Q_NORMAL, p, spec);
@@ -316,8 +305,7 @@ pub fn sync_space(atoms: &[Atom]) -> Result<(), PrologError> {
         .unwrap();
         let term = api.new_term_ref();
         api.chars_to_term(c_code.as_ptr(), term);
-        let user_mod = api.new_module(api.new_atom(b"user\0".as_ptr() as *const _));
-        api.call(term, user_mod);
+        api.call(term, api.new_module(api.new_atom(b"user\0".as_ptr() as *const _)));
         for atom in atoms {
             let Atom::Expr(items) = atom else { continue };
             if items.is_empty() { continue; }

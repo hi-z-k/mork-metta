@@ -55,52 +55,25 @@ thread_local! {
     static VM_DEPTH: Cell<u32> = Cell::new(0);
 }
 
-fn resolve_import_file(
-    path: &str,
-    ext: &str,
-    import_dir: &std::path::Path,
-) -> Option<std::path::PathBuf> {
+fn resolve_import_file(path: &str, ext: &str, import_dir: &std::path::Path) -> Option<std::path::PathBuf> {
     let direct = std::path::Path::new(path);
-    if direct.exists() {
-        return Some(direct.to_path_buf());
-    }
+    if direct.exists() { return Some(direct.to_path_buf()); }
     let with_ext = format!("{path}.{ext}");
-    [
-        std::path::PathBuf::from(&with_ext),
-        import_dir.join(path),
-        import_dir.join(&with_ext),
-    ]
-    .into_iter()
-    .find(|p| p.exists())
+    [std::path::PathBuf::from(&with_ext), import_dir.join(path), import_dir.join(&with_ext)]
+        .into_iter().find(|p| p.exists())
 }
 
 pub(super) fn import_search_dirs(import_dir: &std::path::Path) -> [std::path::PathBuf; 5] {
-    [
-        std::path::PathBuf::from("."),
-        import_dir.to_path_buf(),
-        std::path::PathBuf::from("lib"),
-        import_dir.join("../lib"),
-        import_dir.join("lib"),
-    ]
+    [std::path::PathBuf::from("."), import_dir.to_path_buf(), std::path::PathBuf::from("lib"), import_dir.join("../lib"), import_dir.join("lib")]
 }
 
-fn resolve_in_bases(
-    path: &str,
-    ext: &str,
-    import_dir: &std::path::Path,
-) -> Option<std::path::PathBuf> {
+fn resolve_in_bases(path: &str, ext: &str, import_dir: &std::path::Path) -> Option<std::path::PathBuf> {
     let with_ext = format!("{path}.{ext}");
     import_search_dirs(import_dir).iter().find_map(|b| {
         let c = b.join(path);
-        if c.exists() {
-            return Some(c);
-        }
+        if c.exists() { return Some(c); }
         let c = b.join(&with_ext);
-        if c.exists() {
-            Some(c)
-        } else {
-            None
-        }
+        if c.exists() { Some(c) } else { None }
     })
 }
 
@@ -2266,25 +2239,17 @@ fn run_vm_inner(
                     let _space_rs = state.stack.pop(); // space-ref consumed but unused for Python
                     let import_dir = funcs.import_dir.lock().unwrap().clone();
                     let resolved = resolve_import_file(&path, "py", &import_dir).ok_or_else(|| {
-                        format!(
-                            "import!: cannot find Python file '{}' (searched CWD and '{}')",
-                            path,
-                            import_dir.display()
-                        )
+                        format!("import!: cannot find Python file '{}' (searched CWD and '{}')", path, import_dir.display())
                     })?;
                     eval_py_import_library(&resolved)?;
                     state.stack.push(plain(vec![Atom::sym("true")]));
                     state.ip += 1;
                 }
                 Opcode::PrologImport { path } => {
-                    let _space_rs = state.stack.pop(); // space-ref consumed but unused
+                    let _space_rs = state.stack.pop();
                     let import_dir = funcs.import_dir.lock().unwrap().clone();
                     let resolved = resolve_import_file(&path, "pl", &import_dir).ok_or_else(|| {
-                        format!(
-                            "import!: cannot find Prolog file '{}' (searched CWD and '{}')",
-                            path,
-                            import_dir.display()
-                        )
+                        format!("import!: cannot find Prolog file '{}' (searched CWD and '{}')", path, import_dir.display())
                     })?;
                     #[cfg(feature = "prolog-bridge")]
                     {
@@ -2293,15 +2258,9 @@ fn run_vm_inner(
                         state.ip += 1;
                     }
                     #[cfg(not(feature = "prolog-bridge"))]
-                    {
-                        return Err("prolog-bridge feature not enabled".into());
-                    }
+                    { return Err("prolog-bridge feature not enabled".into()); }
                 }
-                Opcode::TranslatePredicate {
-                    head,
-                    nargs,
-                    free_vars_map: _,
-                } => {
+                Opcode::TranslatePredicate { head, nargs, free_vars_map: _ } => {
                     #[cfg(feature = "prolog-bridge")]
                     {
                         let head_atom = crate::parser::expr_to_atom(head);
@@ -2312,9 +2271,7 @@ fn run_vm_inner(
                         let mut results: ResultSet = Vec::new();
                         for (combo, combo_env) in super::super::budget::threaded_combinations(&arg_sets) {
                             let mut goal_items = vec![head_atom.clone()];
-                            for arg in &combo {
-                                goal_items.push(subst_atom(arg, &combo_env));
-                            }
+                            for arg in &combo { goal_items.push(subst_atom(arg, &combo_env)); }
                             let goal_atom = Atom::Expr(expr_data(goal_items));
                             if goal_atom.to_sexpr_string().contains("&self") {
                                 static LAST_SYNCED_STAMP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
@@ -2324,20 +2281,13 @@ fn run_vm_inner(
                                     let _ = crate::eval::prolog::vm::sync_space(&space_atoms);
                                 }
                             }
-                            results.extend(crate::eval::prolog::vm::eval_translate_predicate_atom(
-                                &goal_atom,
-                                &base_env,
-                                &state.free_vars_map,
-                                &state.free_vars_bindings,
-                            )?);
+                            results.extend(crate::eval::prolog::vm::eval_translate_predicate_atom(&goal_atom, &base_env, &state.free_vars_map, &state.free_vars_bindings)?);
                         }
                         state.stack.push(results);
                         state.ip += 1;
                     }
                     #[cfg(not(feature = "prolog-bridge"))]
-                    {
-                        return Err("prolog-bridge feature not enabled".into());
-                    }
+                    { return Err("prolog-bridge feature not enabled".into()); }
                 }
                 Opcode::PyCall { expr } => {
                     // Direct VM opcode for py-call — bypasses dispatch.rs entirely.
@@ -2401,50 +2351,23 @@ fn run_vm_inner(
                     if is_py {
                         let import_dir = funcs.import_dir.lock().unwrap().clone();
                         let resolved = resolve_import_file(path.as_ref(), "py", &import_dir)
-                            .ok_or_else(|| {
-                                format!(
-                                    "import!: cannot find Python file '{}' (searched CWD and '{}')",
-                                    path,
-                                    import_dir.display()
-                                )
-                            })?;
+                            .ok_or_else(|| format!("import!: cannot find Python file '{}' (searched CWD and '{}')", path, import_dir.display()))?;
                         eval_py_import_library(&resolved)?;
                         state.stack.push(plain(vec![Atom::sym("true")]));
                     } else if is_pl {
                         let import_dir = funcs.import_dir.lock().unwrap().clone();
                         let resolved = resolve_in_bases(path.as_ref(), "pl", &import_dir)
-                            .ok_or_else(|| {
-                                format!(
-                                    "import!: cannot find Prolog file '{}' (searched CWD and '{}')",
-                                    path,
-                                    import_dir.display()
-                                )
-                            })?;
+                            .ok_or_else(|| format!("import!: cannot find Prolog file '{}' (searched CWD and '{}')", path, import_dir.display()))?;
                         #[cfg(feature = "prolog-bridge")]
-                        {
-                            crate::eval::prolog::vm::consult_file(&resolved.to_string_lossy())?;
-                            state.stack.push(plain(vec![Atom::sym("true")]));
-                        }
+                        { crate::eval::prolog::vm::consult_file(&resolved.to_string_lossy())?; state.stack.push(plain(vec![Atom::sym("true")])); }
                         #[cfg(not(feature = "prolog-bridge"))]
-                        {
-                            return Err("prolog-bridge feature not enabled".into());
-                        }
+                        { return Err("prolog-bridge feature not enabled".into()); }
                     } else {
                         let import_dir = funcs.import_dir.lock().unwrap().clone();
-                        let resolved =
-                            resolve_import_path(path.as_ref(), &import_dir).ok_or_else(|| {
-                                format!(
-                                    "import!: cannot find '{}' (searched CWD and '{}')",
-                                    path,
-                                    import_dir.display()
-                                )
-                            })?;
-                        let new_dir = resolved
-                            .parent()
-                            .unwrap_or(std::path::Path::new("."))
-                            .to_path_buf();
-                        let prev_dir =
-                            std::mem::replace(&mut *funcs.import_dir.lock().unwrap(), new_dir);
+                        let resolved = resolve_import_path(path.as_ref(), &import_dir)
+                            .ok_or_else(|| format!("import!: cannot find '{}' (searched CWD and '{}')", path, import_dir.display()))?;
+                        let new_dir = resolved.parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
+                        let prev_dir = std::mem::replace(&mut *funcs.import_dir.lock().unwrap(), new_dir);
                         let atoms = load_metta_file(&resolved, &space_ref, &base_env, funcs)?;
                         *funcs.import_dir.lock().unwrap() = prev_dir;
                         state.stack.push(plain(atoms));
@@ -2903,23 +2826,11 @@ fn run_vm_inner(
                         results.extend(sub_results);
                     }
                     CallFrameKind::Case { results, .. } => {
-                        let merged: Vec<(Atom, Env)> = sub_results
-                            .into_iter()
-                            .map(|(atom, env)| {
-                                let merged_env = prepend_chain(env, &base_env);
-                                (atom, merged_env)
-                            })
-                            .collect();
+                        let merged: Vec<(Atom, Env)> = sub_results.into_iter().map(|(atom, env)| (atom, prepend_chain(env, &base_env))).collect();
                         results.extend(merged);
                     }
                     CallFrameKind::Call { results, .. } => {
-                        let merged: Vec<(Atom, Env)> = sub_results
-                            .into_iter()
-                            .map(|(atom, env)| {
-                                let merged_env = prepend_chain(env, &base_env);
-                                (atom, merged_env)
-                            })
-                            .collect();
+                        let merged: Vec<(Atom, Env)> = sub_results.into_iter().map(|(atom, env)| (atom, prepend_chain(env, &base_env))).collect();
                         results.extend(merged);
                     }
                     CallFrameKind::Eval { results, .. } => {
@@ -3351,11 +3262,7 @@ fn dispatch_call(
 /// Run the next iteration of the Let opcode in flat frame-based control flow.
 fn run_next_let_iteration(state: &mut VMState, funcs: &FnTable) -> Result<Option<Env>, String> {
     let mut to_run = None;
-    let saved_base_env = state
-        .frames
-        .last()
-        .map(|f| f.saved_base_env.clone())
-        .unwrap_or_else(Env::new);
+    let saved_base_env = state.frames.last().map(|f| f.saved_base_env.clone()).unwrap_or_else(Env::new);
     if let Some(frame) = state.frames.last_mut() {
         if let CallFrameKind::Let {
             value_rs,
@@ -3371,14 +3278,9 @@ fn run_next_let_iteration(state: &mut VMState, funcs: &FnTable) -> Result<Option
             while *next_idx < value_rs.len() {
                 let (value, value_env) = &value_rs[*next_idx];
                 *next_idx += 1;
-                // Single-assignment: a pattern variable already bound in the
-                // enclosing environment must unify with the value instead of
-                // being shadowed.
                 let mut seed_env = Env::new();
                 for var in seed_vars.iter() {
-                    if let Some(bound) = lookup(&saved_base_env, var) {
-                        seed_env = bind(&seed_env, var, bound);
-                    }
+                    if let Some(bound) = lookup(&saved_base_env, var) { seed_env = bind(&seed_env, var, bound); }
                 }
                 if let Some(match_env) = try_match_one(pattern, value, &seed_env, funcs)? {
                     let body_env = prepend_chain(match_env, value_env);
