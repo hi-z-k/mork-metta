@@ -322,6 +322,11 @@ impl VMCompiler {
                             };
                             let mut pattern_vars = Vec::new();
                             collect_pattern_vars(&items[1], &mut pattern_vars);
+                            let seed_vars: Vec<String> = pattern_vars
+                                .iter()
+                                .filter(|v| self.locals.contains(v))
+                                .cloned()
+                                .collect();
                             body_comp.locals.extend(pattern_vars.clone());
 
                             let mut body_code = Vec::new();
@@ -336,6 +341,7 @@ impl VMCompiler {
                                 pattern: items[1].clone(),
                                 body_code: std::sync::Arc::from(body_code),
                                 pattern_vars,
+                                seed_vars,
                                 free_vars_map: std::sync::Arc::from(body_comp.free_vars),
                             });
                             return Ok(());
@@ -1047,6 +1053,11 @@ impl VMCompiler {
         };
         let mut pattern_vars = Vec::new();
         collect_pattern_vars(pattern, &mut pattern_vars);
+        let seed_vars: Vec<String> = pattern_vars
+            .iter()
+            .filter(|v| self.locals.contains(v))
+            .cloned()
+            .collect();
         body_comp.locals.extend(pattern_vars.clone());
 
         let mut body_code = Vec::new();
@@ -1061,6 +1072,7 @@ impl VMCompiler {
             pattern: pattern.clone(),
             body_code: std::sync::Arc::from(body_code),
             pattern_vars,
+            seed_vars,
             free_vars_map: std::sync::Arc::from(body_comp.free_vars),
         });
         Ok(())

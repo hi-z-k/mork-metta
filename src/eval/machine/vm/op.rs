@@ -86,6 +86,7 @@ pub enum Opcode {
         pattern: Expr,
         body_code: Arc<[Opcode]>,
         pattern_vars: Vec<String>,
+        seed_vars: Vec<String>,
         free_vars_map: Arc<[String]>,
     },
     If {

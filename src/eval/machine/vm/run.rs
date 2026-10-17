@@ -1206,6 +1206,7 @@ fn run_vm_inner(
                     pattern,
                     body_code,
                     pattern_vars,
+                    seed_vars,
                     free_vars_map,
                 } => {
                     let _profile = if cfg!(feature = "profile") {
@@ -1227,6 +1228,7 @@ fn run_vm_inner(
                             next_idx: 0,
                             pattern: pattern.clone(),
                             pattern_vars: pattern_vars.clone(),
+                            seed_vars: seed_vars.clone(),
                             free_vars_map: free_vars_map.clone(),
                             body_code: body_code.clone(),
                             results: Vec::new(),
@@ -3384,12 +3386,18 @@ fn dispatch_call(
 /// Run the next iteration of the Let opcode in flat frame-based control flow.
 fn run_next_let_iteration(state: &mut VMState, funcs: &FnTable) -> Result<Option<Env>, String> {
     let mut to_run = None;
+    let saved_base_env = state
+        .frames
+        .last()
+        .map(|f| f.saved_base_env.clone())
+        .unwrap_or_else(Env::new);
     if let Some(frame) = state.frames.last_mut() {
         if let CallFrameKind::Let {
             value_rs,
             next_idx,
             pattern,
             pattern_vars,
+            seed_vars,
             free_vars_map,
             body_code,
             results: _,
@@ -3398,7 +3406,16 @@ fn run_next_let_iteration(state: &mut VMState, funcs: &FnTable) -> Result<Option
             while *next_idx < value_rs.len() {
                 let (value, value_env) = &value_rs[*next_idx];
                 *next_idx += 1;
-                if let Some(match_env) = try_match_one(pattern, value, &Env::new(), funcs)? {
+                // Single-assignment: a pattern variable already bound in the
+                // enclosing environment must unify with the value instead of
+                // being shadowed.
+                let mut seed_env = Env::new();
+                for var in seed_vars.iter() {
+                    if let Some(bound) = lookup(&saved_base_env, var) {
+                        seed_env = bind(&seed_env, var, bound);
+                    }
+                }
+                if let Some(match_env) = try_match_one(pattern, value, &seed_env, funcs)? {
                     let body_env = prepend_chain(match_env, value_env);
                     let mut locals_to_push = Vec::new();
                     for var in pattern_vars {
