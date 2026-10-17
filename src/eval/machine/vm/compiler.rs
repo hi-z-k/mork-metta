@@ -704,45 +704,26 @@ impl VMCompiler {
                                             } else if p.ends_with(".pl") {
                                                 Some(Opcode::PrologImport { path: p.clone() })
                                             } else {
-                                                let with_pl = format!("{}.pl", p);
-                                                let with_py = format!("{}.py", p);
-                                                let with_metta = format!("{}.metta", p);
                                                 let import_dir = current_funcs().map(|f| f.import_dir.lock().unwrap().clone()).unwrap_or_default();
-                                                let search_dirs = [
-                                                    std::path::PathBuf::from("."),
-                                                    import_dir.clone(),
-                                                    std::path::PathBuf::from("lib"),
-                                                    import_dir.join("../lib"),
-                                                    import_dir.join("lib"),
-                                                ];
-                                                let mut found_metta = false;
-                                                for dir in &search_dirs {
-                                                    if dir.join(&with_metta).exists() {
-                                                        found_metta = true;
-                                                        break;
-                                                    }
-                                                }
-                                                if found_metta {
+                                                let dirs = super::run::import_search_dirs(&import_dir);
+                                                if dirs.iter().any(|d| d.join(format!("{p}.metta")).exists()) {
                                                     Some(Opcode::ImportFile { path: p.clone() })
                                                 } else {
-                                                    let mut found_pl = false;
-                                                    let mut found_py = false;
-                                                    for dir in &search_dirs {
-                                                        if dir.join(&with_pl).exists() {
-                                                            found_pl = true;
-                                                            break;
+                                                    let pl = format!("{p}.pl");
+                                                    let py = format!("{p}.py");
+                                                    let ext = dirs.iter().find_map(|d| {
+                                                        if d.join(&pl).exists() {
+                                                            Some(true)
+                                                        } else if d.join(&py).exists() {
+                                                            Some(false)
+                                                        } else {
+                                                            None
                                                         }
-                                                        if dir.join(&with_py).exists() {
-                                                            found_py = true;
-                                                            break;
-                                                        }
-                                                    }
-                                                    if found_pl {
-                                                        Some(Opcode::PrologImport { path: with_pl })
-                                                    } else if found_py {
-                                                        Some(Opcode::PythonImport { path: with_py })
-                                                    } else {
-                                                        Some(Opcode::ImportFile { path: p.clone() })
+                                                    });
+                                                    match ext {
+                                                        Some(true) => Some(Opcode::PrologImport { path: pl }),
+                                                        Some(false) => Some(Opcode::PythonImport { path: py }),
+                                                        None => Some(Opcode::ImportFile { path: p.clone() }),
                                                     }
                                                 }
                                             }
@@ -887,14 +868,12 @@ impl VMCompiler {
                                     self.free_vars.push(v.clone());
                                 }
                             }
-                            // The head is a literal Prolog predicate; arguments are
-                            // MeTTa expressions evaluated before marshalling.
                             let (head, nargs) = match &items[1] {
-                                Expr::List(goal_items) if !goal_items.is_empty() => {
-                                    for arg in &goal_items[1..] {
+                                Expr::List(g) if !g.is_empty() => {
+                                    for arg in &g[1..] {
                                         self.compile(arg, code, false)?;
                                     }
-                                    (goal_items[0].clone(), (goal_items.len() - 1) as u8)
+                                    (g[0].clone(), (g.len() - 1) as u8)
                                 }
                                 other => (other.clone(), 0),
                             };
@@ -909,39 +888,22 @@ impl VMCompiler {
                     }
                 }
 
-                // Check for compile-time translator rule expansion (syntactic macros)
                 if let Expr::Symbol(head) = &items[0] {
                     if let Some(funcs) = current_funcs() {
-                        let is_translator_rule = funcs.translator_rules.read().unwrap().contains(head);
-                        if is_translator_rule {
+                        if funcs.translator_rules.read().unwrap().contains(head) {
                             let arity = (items.len() - 1) as u8;
                             if let Some(clauses) = lookup_user_clauses(head, arity, funcs) {
                                 for (patterns, body) in &clauses {
                                     let mut subst = std::collections::HashMap::new();
-                                    let mut matched = true;
-                                    for (p, a) in patterns.iter().zip(items[1..].iter()) {
-                                        if !match_expr_pattern(p, a, &mut subst) {
-                                            matched = false;
-                                            break;
-                                        }
-                                    }
-                                    if matched {
+                                    if patterns.iter().zip(items[1..].iter()).all(|(p, a)| match_expr_pattern(p, a, &mut subst)) {
                                         let template = match body {
-                                            Expr::List(q_items) if q_items.len() == 2 => {
-                                                if let Expr::Symbol(q_sym) = &q_items[0] {
-                                                    if q_sym == "quote" {
-                                                        &q_items[1]
-                                                    } else {
-                                                        body
-                                                    }
-                                                } else {
-                                                    body
-                                                }
-                                            }
+                                            Expr::List(q) if q.len() == 2 => match &q[0] {
+                                                Expr::Symbol(s) if s == "quote" => &q[1],
+                                                _ => body,
+                                            },
                                             _ => body,
                                         };
-                                        let expanded = subst_expr_template(template, &subst);
-                                        return self.compile(&expanded, code, is_tail);
+                                        return self.compile(&subst_expr_template(template, &subst), code, is_tail);
                                     }
                                 }
                             }

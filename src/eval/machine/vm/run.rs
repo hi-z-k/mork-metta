@@ -74,6 +74,36 @@ fn resolve_import_file(
     .find(|p| p.exists())
 }
 
+pub(super) fn import_search_dirs(import_dir: &std::path::Path) -> [std::path::PathBuf; 5] {
+    [
+        std::path::PathBuf::from("."),
+        import_dir.to_path_buf(),
+        std::path::PathBuf::from("lib"),
+        import_dir.join("../lib"),
+        import_dir.join("lib"),
+    ]
+}
+
+fn resolve_in_bases(
+    path: &str,
+    ext: &str,
+    import_dir: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    let with_ext = format!("{path}.{ext}");
+    import_search_dirs(import_dir).iter().find_map(|b| {
+        let c = b.join(path);
+        if c.exists() {
+            return Some(c);
+        }
+        let c = b.join(&with_ext);
+        if c.exists() {
+            Some(c)
+        } else {
+            None
+        }
+    })
+}
+
 fn replace_at_path(atom: &mut Atom, path: &[usize], val: Atom) {
     if path.is_empty() {
         *atom = val;
@@ -2275,50 +2305,31 @@ fn run_vm_inner(
                     #[cfg(feature = "prolog-bridge")]
                     {
                         let head_atom = crate::parser::expr_to_atom(head);
-
-                        // Pop the evaluated arguments pushed by the compiler, in order.
-                        let mut arg_sets: Vec<ResultSet> = Vec::with_capacity(*nargs as usize);
-                        for _ in 0..*nargs {
-                            arg_sets.push(
-                                state
-                                    .stack
-                                    .pop()
-                                    .ok_or("VM stack underflow on TranslatePredicate arg")?,
-                            );
-                        }
+                        let mut arg_sets: Vec<ResultSet> = (0..*nargs)
+                            .map(|_| state.stack.pop().ok_or("VM stack underflow on TranslatePredicate arg"))
+                            .collect::<Result<_, _>>()?;
                         arg_sets.reverse();
-
                         let mut results: ResultSet = Vec::new();
-                        for (combo, combo_env) in
-                            super::super::budget::threaded_combinations(&arg_sets)
-                        {
+                        for (combo, combo_env) in super::super::budget::threaded_combinations(&arg_sets) {
                             let mut goal_items = vec![head_atom.clone()];
                             for arg in &combo {
                                 goal_items.push(subst_atom(arg, &combo_env));
                             }
                             let goal_atom = Atom::Expr(expr_data(goal_items));
-
                             if goal_atom.to_sexpr_string().contains("&self") {
-                                static LAST_SYNCED_STAMP: std::sync::atomic::AtomicU64 =
-                                    std::sync::atomic::AtomicU64::new(u64::MAX);
-                                let current_stamp =
-                                    funcs.memo_stamp.load(std::sync::atomic::Ordering::Relaxed);
-                                if LAST_SYNCED_STAMP
-                                    .swap(current_stamp, std::sync::atomic::Ordering::Relaxed)
-                                    != current_stamp
-                                {
+                                static LAST_SYNCED_STAMP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
+                                let stamp = funcs.memo_stamp.load(std::sync::atomic::Ordering::Relaxed);
+                                if LAST_SYNCED_STAMP.swap(stamp, std::sync::atomic::Ordering::Relaxed) != stamp {
                                     let space_atoms = funcs.space.read().unwrap().get_atoms();
                                     let _ = crate::eval::prolog::vm::sync_space(&space_atoms);
                                 }
                             }
-
-                            let rs = crate::eval::prolog::vm::eval_translate_predicate_atom(
+                            results.extend(crate::eval::prolog::vm::eval_translate_predicate_atom(
                                 &goal_atom,
                                 &base_env,
                                 &state.free_vars_map,
                                 &state.free_vars_bindings,
-                            )?;
-                            results.extend(rs);
+                            )?);
                         }
                         state.stack.push(results);
                         state.ip += 1;
@@ -2389,70 +2400,29 @@ fn run_vm_inner(
                     let is_pl = path.ends_with(".pl");
                     if is_py {
                         let import_dir = funcs.import_dir.lock().unwrap().clone();
-                        let py_path = std::path::Path::new(path.as_ref());
-                        let resolved = if py_path.exists() {
-                            Some(py_path.to_path_buf())
-                        } else {
-                            let with_ext = format!("{}.py", path);
-                            let py_ext = std::path::Path::new(&with_ext);
-                            if py_ext.exists() {
-                                Some(py_ext.to_path_buf())
-                            } else {
-                                let in_dir = import_dir.join(path.as_ref());
-                                if in_dir.exists() {
-                                    Some(in_dir)
-                                } else {
-                                    let in_dir_ext = import_dir.join(&with_ext);
-                                    if in_dir_ext.exists() {
-                                        Some(in_dir_ext)
-                                    } else {
-                                        None
-                                    }
-                                }
-                            }
-                        }
-                        .ok_or_else(|| {
-                            format!(
-                                "import!: cannot find Python file '{}' (searched CWD and '{}')",
-                                path,
-                                import_dir.display()
-                            )
-                        })?;
+                        let resolved = resolve_import_file(path.as_ref(), "py", &import_dir)
+                            .ok_or_else(|| {
+                                format!(
+                                    "import!: cannot find Python file '{}' (searched CWD and '{}')",
+                                    path,
+                                    import_dir.display()
+                                )
+                            })?;
                         eval_py_import_library(&resolved)?;
                         state.stack.push(plain(vec![Atom::sym("true")]));
                     } else if is_pl {
                         let import_dir = funcs.import_dir.lock().unwrap().clone();
-                        let bases = [
-                            std::path::PathBuf::from("."),
-                            import_dir.clone(),
-                            std::path::PathBuf::from("lib"),
-                            import_dir.join("../lib"),
-                            import_dir.join("lib"),
-                        ];
-                        let with_ext = format!("{}.pl", path);
-                        let mut _resolved = None;
-                        for base in &bases {
-                            let cand1 = base.join(path.as_ref());
-                            if cand1.exists() {
-                                _resolved = Some(cand1);
-                                break;
-                            }
-                            let cand2 = base.join(&with_ext);
-                            if cand2.exists() {
-                                _resolved = Some(cand2);
-                                break;
-                            }
-                        }
-                        let _resolved = _resolved.ok_or_else(|| {
-                            format!(
-                                "import!: cannot find Prolog file '{}' (searched CWD and '{}')",
-                                path,
-                                import_dir.display()
-                            )
-                        })?;
+                        let resolved = resolve_in_bases(path.as_ref(), "pl", &import_dir)
+                            .ok_or_else(|| {
+                                format!(
+                                    "import!: cannot find Prolog file '{}' (searched CWD and '{}')",
+                                    path,
+                                    import_dir.display()
+                                )
+                            })?;
                         #[cfg(feature = "prolog-bridge")]
                         {
-                            crate::eval::prolog::vm::consult_file(&_resolved.to_string_lossy())?;
+                            crate::eval::prolog::vm::consult_file(&resolved.to_string_lossy())?;
                             state.stack.push(plain(vec![Atom::sym("true")]));
                         }
                         #[cfg(not(feature = "prolog-bridge"))]
