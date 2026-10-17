@@ -20,10 +20,8 @@ use crate::eval::prolog::error::PrologError;
 pub type PL_engine_t = usize;
 /// Main engine constant.
 pub const PL_ENGINE_MAIN: PL_engine_t = 1;
-pub const PL_ENGINE_CURRENT: PL_engine_t = 2;
-pub const PL_ENGINE_NONE: PL_engine_t = 0;
 /// Engine set return status.
-pub const PL_ENGINE_SET: c_int = 0;
+pub const PL_ENGINE_NONE: PL_engine_t = 0;
 
 /// Opaque foreign frame handle.
 pub type fid_t = usize;
@@ -54,7 +52,6 @@ pub const PL_S_FALSE: c_int = 0;
 pub const PL_S_TRUE: c_int = 1;
 pub const PL_S_LAST: c_int = 2;
 pub const PL_S_EXCEPTION: c_int = -1;
-pub const PL_S_NOT_INNER: c_int = -2;
 
 /// Term type tags (for `PL_term_type`).
 pub const PL_VARIABLE: c_int = 1;
@@ -65,25 +62,13 @@ pub const PL_STRING: c_int = 6;
 pub const PL_TERM: c_int = 7;
 pub const PL_NIL: c_int = 8;
 pub const PL_LIST_PAIR: c_int = 10;
-pub const PL_FUNCTOR: c_int = 11;
 
 /// `PL_get_chars` flags.
 pub const CVT_ATOM: c_uint = 0x0001;
 pub const CVT_STRING: c_uint = 0x0002;
-pub const CVT_LIST: c_uint = 0x0004;
 pub const CVT_INTEGER: c_uint = 0x0008;
 pub const CVT_FLOAT: c_uint = 0x0010;
-pub const CVT_NUMBER: c_uint = CVT_INTEGER | CVT_FLOAT;
-pub const CVT_ATOMIC: c_uint = CVT_ATOM | CVT_NUMBER | CVT_STRING;
 pub const CVT_WRITE: c_uint = 0x0080;
-pub const CVT_WRITE_CANONICAL: c_uint = 0x0100;
-pub const CVT_WRITEQ: c_uint = 0x0200;
-pub const CVT_ALL: c_uint = 0x00FF;
-pub const CVT_VARIABLE: c_uint = 0x0400;
-pub const CVT_EXCEPTION: c_uint = 0x0800;
-
-/// Foreign function flag: variable arity.
-pub const PL_FA_VARARGS: c_int = 0x0001;
 
 /// The subset of the SWI-Prolog foreign interface used by the bridge.
 ///
@@ -334,19 +319,4 @@ impl Api {
     fn not_found(dir: &str) -> PrologError {
         PrologError::LibraryNotFound(format!("could not locate libswipl in {dir}"))
     }
-}
-
-// RAII guard retained for callers that want an explicit init point.
-pub struct PrologInitGuard;
-impl Drop for PrologInitGuard {
-    fn drop(&mut self) {
-        // Intentionally do not call PL_cleanup: the runtime is process-wide and
-        // shared with other tests/threads. The OS reclaims resources on exit.
-    }
-}
-
-/// Initialize the Prolog runtime and return a guard.
-pub fn init_prolog() -> Result<PrologInitGuard, PrologError> {
-    Api::get()?;
-    Ok(PrologInitGuard)
 }

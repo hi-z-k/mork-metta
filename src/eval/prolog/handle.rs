@@ -6,7 +6,6 @@ use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::atom::Grounded;
-use crate::eval::prolog::error::PrologError;
 use crate::eval::prolog::ffi::record_t;
 
 /// Global counter for generating unique foreign term IDs.
@@ -27,19 +26,6 @@ impl PrologForeign {
     pub fn new(record: record_t) -> Self {
         let id = FOREIGN_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
         PrologForeign { record, id }
-    }
-
-    /// Get the recorded term handle.
-    pub fn record(&self) -> record_t {
-        self.record
-    }
-
-    /// Erase the recorded term via the Prolog worker thread.
-    pub fn erase(&self) -> Result<(), PrologError> {
-        // Note: we don't have a dedicated EraseRecord command yet,
-        // so we just return Ok. The record will be cleaned up when
-        // the Prolog runtime shuts down.
-        Ok(())
     }
 }
 

@@ -39,13 +39,6 @@ pub fn register_prolog_builtins(funcs: &FnTable) {
         Ok(NDet::single(Atom::sym(answer)))
     });
 
-    // (assertaPredicate G) -> True
-    funcs.insert_native("assertaPredicate", 1, |args, _| {
-        expect_n_args(args, 1, "assertaPredicate")?;
-        ops::asserta_clause(&args[0]).map_err(|e| e.to_string())?;
-        Ok(NDet::single(Atom::sym("True")))
-    });
-
     // (assertzPredicate G) -> True
     funcs.insert_native("assertzPredicate", 1, |args, _| {
         expect_n_args(args, 1, "assertzPredicate")?;

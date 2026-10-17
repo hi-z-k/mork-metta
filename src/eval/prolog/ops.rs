@@ -302,11 +302,6 @@ pub fn step_query(api: &Api, qid: qid_t, result: term_t) -> StepStreamResult {
     }
 }
 
-/// Assert a clause at the front (`asserta/1`) on the main engine.
-pub fn asserta_clause(clause: &Atom) -> Result<(), PrologError> {
-    assert_clause(clause, b"asserta\0")
-}
-
 /// Assert a clause at the back (`assertz/1`) on the main engine.
 pub fn assertz_clause(clause: &Atom) -> Result<(), PrologError> {
     assert_clause(clause, b"assertz\0")

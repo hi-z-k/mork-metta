@@ -116,7 +116,7 @@ pub fn goal_to_term(
 ) -> Result<term_t, PrologError> {
     let goal = strip_quote_atom(goal);
     if let Atom::Expr(items) = goal {
-        if items.len() == 2 && items[0].as_sym().map(|s| s == "Predicate" || s == "Compound").unwrap_or(false) {
+        if items.len() == 2 && items[0].as_sym().map(|s| s == "Predicate").unwrap_or(false) {
             return atom_to_term(goal, api, var_map);
         }
         if let Some(Atom::Sym(head)) = items.first() {
@@ -148,11 +148,11 @@ pub fn is_prolog_operator(s: &str) -> bool {
     )
 }
 
-/// Extract a `(Predicate (f args...))` or `(Compound f args...)` compound from an expression.
+/// Extract a `(Predicate (f args...))` compound from an expression.
 fn extract_predicate_compound<'a>(items: &'a [Atom]) -> Option<(&'a str, Vec<&'a Atom>)> {
     if items.len() == 2 {
         if let Some(Atom::Sym(s)) = items.first() {
-            if s.as_str() == "Predicate" || s.as_str() == "Compound" {
+            if s.as_str() == "Predicate" {
                 match &items[1] {
                     Atom::Expr(inner) => {
                         if let Some(Atom::Sym(head)) = inner.first() {
@@ -163,15 +163,6 @@ fn extract_predicate_compound<'a>(items: &'a [Atom]) -> Option<(&'a str, Vec<&'a
                         return Some((head.as_str(), Vec::new()));
                     }
                     _ => {}
-                }
-            }
-        }
-    }
-    if items.len() >= 2 {
-        if let Some(Atom::Sym(s)) = items.first() {
-            if s.as_str() == "Compound" {
-                if let Some(Atom::Sym(head)) = items.get(1) {
-                    return Some((head.as_str(), items[2..].iter().collect()));
                 }
             }
         }
