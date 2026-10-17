@@ -19,28 +19,17 @@ pub type qid_t = usize;
 pub const PL_ENGINE_MAIN: PL_engine_t = 1;
 pub const PL_ENGINE_NONE: PL_engine_t = 0;
 
-pub const PL_Q_NORMAL: c_int = 0x0002;
-pub const PL_Q_NODEBUG: c_int = 0x0004;
-pub const PL_Q_CATCH_EXCEPTION: c_int = 0x0008;
-pub const PL_Q_EXT_STATUS: c_int = 0x0040;
+pub const PL_Q_NORMAL: c_int = 0x0002; pub const PL_Q_NODEBUG: c_int = 0x0004;
+pub const PL_Q_CATCH_EXCEPTION: c_int = 0x0008; pub const PL_Q_EXT_STATUS: c_int = 0x0040;
 
-pub const PL_S_TRUE: c_int = 1;
-pub const PL_S_LAST: c_int = 2;
-pub const PL_S_EXCEPTION: c_int = -1;
+pub const PL_S_TRUE: c_int = 1; pub const PL_S_LAST: c_int = 2; pub const PL_S_EXCEPTION: c_int = -1;
 
-pub const PL_VARIABLE: c_int = 1;
-pub const PL_ATOM: c_int = 2;
-pub const PL_INTEGER: c_int = 3;
-pub const PL_FLOAT: c_int = 5;
-pub const PL_STRING: c_int = 6;
-pub const PL_TERM: c_int = 7;
-pub const PL_NIL: c_int = 8;
-pub const PL_LIST_PAIR: c_int = 10;
+pub const PL_VARIABLE: c_int = 1; pub const PL_ATOM: c_int = 2; pub const PL_INTEGER: c_int = 3;
+pub const PL_FLOAT: c_int = 5; pub const PL_STRING: c_int = 6; pub const PL_TERM: c_int = 7;
+pub const PL_NIL: c_int = 8; pub const PL_LIST_PAIR: c_int = 10;
 
-pub const CVT_ATOM: c_uint = 0x0001;
-pub const CVT_STRING: c_uint = 0x0002;
-pub const CVT_INTEGER: c_uint = 0x0008;
-pub const CVT_WRITE: c_uint = 0x0080;
+pub const CVT_ATOM: c_uint = 0x0001; pub const CVT_STRING: c_uint = 0x0002;
+pub const CVT_INTEGER: c_uint = 0x0008; pub const CVT_WRITE: c_uint = 0x0080;
 
 macro_rules! swipl {
     ($( $name:ident = $sym:literal ( $($arg:ident : $ty:ty),* ) -> $ret:ty; )*) => {
@@ -104,9 +93,7 @@ impl Api {
 
     fn load() -> Result<Container<Api>, PrologError> {
         unsafe {
-            if let Ok(base) = std::env::var("PLBASE") {
-                std::env::set_var("SWI_HOME_DIR", &base);
-            }
+            if let Ok(base) = std::env::var("PLBASE") { std::env::set_var("SWI_HOME_DIR", &base); }
             let path = Self::locate_library()?;
             let container: Container<Api> = Container::load(&path)
                 .map_err(|e| PrologError::LibraryNotFound(format!("failed to load '{path}': {e}")))?;
@@ -141,12 +128,8 @@ impl Api {
         let home_bin = std::env::var("HOME").map(|h| format!("{h}/.local/bin/swipl")).unwrap_or_default();
         for swipl_bin in ["swipl", &home_bin, "/usr/bin/swipl", "/usr/local/bin/swipl"] {
             let Ok(output) = std::process::Command::new(swipl_bin).arg("--dump-runtime-variables").output()
-            else {
-                continue;
-            };
-            if !output.status.success() {
-                continue;
-            }
+            else { continue };
+            if !output.status.success() { continue; }
             let stdout = String::from_utf8_lossy(&output.stdout);
             let var = |key: &str| {
                 stdout.lines().find_map(|l| {
@@ -156,14 +139,9 @@ impl Api {
                 })
             };
             if let Some(base) = var("PLBASE=") {
-                unsafe {
-                    std::env::set_var("SWI_HOME_DIR", &base);
-                    std::env::set_var("PLBASE", &base);
-                }
+                unsafe { std::env::set_var("SWI_HOME_DIR", &base); std::env::set_var("PLBASE", &base); }
             }
-            if let Some(lib) = var("PLLIBSWIPL=") {
-                return Ok(lib);
-            }
+            if let Some(lib) = var("PLLIBSWIPL=") { return Ok(lib); }
             if let Some(dir) = var("PLLIBDIR=") {
                 let cands = Self::names().iter().map(|n| format!("{dir}/{n}"));
                 return Self::first_existing(cands).ok_or_else(|| {
@@ -184,12 +162,8 @@ impl Api {
     fn first_existing<I: Iterator<Item = String>>(candidates: I) -> Option<String> {
         let mut bare = None;
         for cand in candidates {
-            if Path::new(&cand).is_file() {
-                return Some(cand);
-            }
-            if !cand.contains('/') {
-                bare = Some(cand);
-            }
+            if Path::new(&cand).is_file() { return Some(cand); }
+            if !cand.contains('/') { bare = Some(cand); }
         }
         bare
     }

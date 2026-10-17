@@ -11,29 +11,20 @@ pub struct PrologForeign {
 }
 
 impl PrologForeign {
-    pub fn new(record: record_t) -> Self {
-        PrologForeign { record }
-    }
+    pub fn new(record: record_t) -> Self { PrologForeign { record } }
 }
 
 impl Grounded for PrologForeign {
-    fn display_metta(&self) -> String {
-        format!("<prolog-foreign:{}>", self.record)
-    }
-
+    fn display_metta(&self) -> String { format!("<prolog-foreign:{}>", self.record) }
     fn eq_gnd(&self, other: &dyn Grounded) -> bool {
         other.as_any().downcast_ref::<PrologForeign>() == Some(self)
     }
-
     fn hash_gnd(&self) -> u64 {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.record.hash(&mut hasher);
         hasher.finish()
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
+    fn as_any(&self) -> &dyn Any { self }
 }
 
 impl fmt::Display for PrologForeign {

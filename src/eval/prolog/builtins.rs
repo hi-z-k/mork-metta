@@ -73,9 +73,7 @@ pub fn register_imported_prolog_function(funcs: &FnTable, functor: &str, arity: 
 }
 
 pub fn try_resolve_imported_prolog_function(funcs: &FnTable, name: &str, arity: u8) -> bool {
-    if !funcs.imported_prolog_funcs.read().unwrap().contains(name) {
-        return false;
-    }
+    if !funcs.imported_prolog_funcs.read().unwrap().contains(name) { return false; }
     if let Ok(arities) = ops::current_arities(name) {
         if arities.contains(&(arity as usize + 1)) {
             register_imported_prolog_function(funcs, name, arity);

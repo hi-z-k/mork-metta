@@ -18,12 +18,7 @@ pub enum FunctionOutcome {
     Exception(String),
 }
 
-enum StepStatus {
-    True,
-    Last,
-    False,
-    Exception(String),
-}
+enum StepStatus { True, Last, False, Exception(String) }
 
 fn sys_pred(api: &Api, name: &[u8], arity: c_int) -> predicate_t {
     unsafe { api.predicate(name.as_ptr() as *const _, arity, b"system\0".as_ptr() as *const _) }
@@ -62,18 +57,10 @@ fn open_call(api: &Api, goal: term_t) -> Result<qid_t, PrologError> {
     }
 }
 
-fn run_once(
-    api: &Api,
-    name: &[u8],
-    arity: c_int,
-    args: term_t,
-    flags: c_int,
-) -> Result<c_int, PrologError> {
+fn run_once(api: &Api, name: &[u8], arity: c_int, args: term_t, flags: c_int) -> Result<c_int, PrologError> {
     unsafe {
         let q = api.open_query(0, flags, sys_pred(api, name, arity), args);
-        if q == 0 {
-            return Err(PrologError::Internal("PL_open_query returned NULL".into()));
-        }
+        if q == 0 { return Err(PrologError::Internal("PL_open_query returned NULL".into())); }
         let rc = api.next_solution(q);
         if rc == PL_S_EXCEPTION {
             let msg = read_exception(api, q);
@@ -122,9 +109,7 @@ pub fn load_prolog_code(manager: &Arc<EngineManager>, code: &str) -> Result<(), 
             api.put_string_chars(sargs, c_code.as_ptr());
             let q = api.open_query(0, PL_Q_NORMAL, sys_pred(api, b"open_string\0", 2), sargs);
             if q == 0 || api.next_solution(q) == 0 {
-                if q != 0 {
-                    api.close_query(q);
-                }
+                if q != 0 { api.close_query(q); }
                 api.discard_foreign_frame(frame);
                 return Err(PrologError::Internal("failed to open_string".into()));
             }
@@ -139,10 +124,7 @@ pub fn load_prolog_code(manager: &Arc<EngineManager>, code: &str) -> Result<(), 
             api.cons_list(opts, opt, opts);
             api.put_term(lf_args + 1, opts);
             let q_load = api.open_query(0, PL_Q_NORMAL, sys_pred(api, b"load_files\0", 2), lf_args);
-            if q_load != 0 {
-                api.next_solution(q_load);
-                api.close_query(q_load);
-            }
+            if q_load != 0 { api.next_solution(q_load); api.close_query(q_load); }
             api.discard_foreign_frame(frame);
             Ok(())
         }
@@ -169,10 +151,7 @@ fn run_goal<T>(
                 loop {
                     match next_solution(api, qid) {
                         StepStatus::True => solutions.push(on_solution(api, &var_map)),
-                        StepStatus::Last => {
-                            solutions.push(on_solution(api, &var_map));
-                            break;
-                        }
+                        StepStatus::Last => { solutions.push(on_solution(api, &var_map)); break; }
                         StepStatus::False => break,
                         StepStatus::Exception(msg) => {
                             api.close_query(qid);
@@ -241,15 +220,10 @@ fn collect_rest(api: &Api, qid: qid_t, result: term_t, first: Atom) -> Vec<Atom>
         match next_solution(api, qid) {
             StepStatus::True => match term_to_atom(result, api, &mut HashMap::new()) {
                 Ok(atom) => out.push(atom),
-                Err(e) => {
-                    out.push(e.to_error_atom(&Atom::sym("prolog_stream")));
-                    break;
-                }
+                Err(e) => { out.push(e.to_error_atom(&Atom::sym("prolog_stream"))); break; }
             },
             StepStatus::Last => {
-                if let Ok(atom) = term_to_atom(result, api, &mut HashMap::new()) {
-                    out.push(atom);
-                }
+                if let Ok(atom) = term_to_atom(result, api, &mut HashMap::new()) { out.push(atom); }
                 break;
             }
             StepStatus::False => break,
@@ -307,9 +281,7 @@ pub fn current_arities(name: &str) -> Result<Vec<usize>, PrologError> {
             if q != 0 {
                 while api.next_solution(q) != 0 {
                     let mut a: i64 = 0;
-                    if api.get_int64(args + 1, &mut a) != 0 && a >= 0 {
-                        arities.insert(a as usize);
-                    }
+                    if api.get_int64(args + 1, &mut a) != 0 && a >= 0 { arities.insert(a as usize); }
                 }
                 api.close_query(q);
             }
@@ -331,9 +303,7 @@ fn collect_bindings(api: &Api, var_map: &VarMap) -> Vec<(String, Atom)> {
     var_map
         .iter()
         .filter_map(|(name, &term)| {
-            term_to_atom(term, api, &mut rev_map)
-                .ok()
-                .map(|atom| (name.clone(), atom))
+            term_to_atom(term, api, &mut rev_map).ok().map(|atom| (name.clone(), atom))
         })
         .collect()
 }
@@ -350,21 +320,14 @@ pub fn sync_space(atoms: &[Atom]) -> Result<(), PrologError> {
         api.call(term, user_mod);
         for atom in atoms {
             let Atom::Expr(items) = atom else { continue };
-            if items.is_empty() {
-                continue;
-            }
+            if items.is_empty() { continue; }
             let mut var_map = VarMap::new();
             let a0 = api.new_term_refs(items.len() as c_int);
             let bad = items.iter().enumerate().any(|(i, it)| match atom_to_term(it, api, &mut var_map) {
-                Ok(t) => {
-                    api.put_term(a0 + i, t);
-                    false
-                }
+                Ok(t) => { api.put_term(a0 + i, t); false }
                 Err(_) => true,
             });
-            if bad {
-                continue;
-            }
+            if bad { continue; }
             let clause_term = api.new_term_ref();
             let self_atom = api.new_atom(b"&self\0".as_ptr() as *const _);
             let f = api.new_functor_sz(self_atom, items.len());

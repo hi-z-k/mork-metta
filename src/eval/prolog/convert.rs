@@ -128,9 +128,7 @@ pub fn is_prolog_operator(s: &str) -> bool {
 }
 
 fn extract_predicate_compound<'a>(items: &'a [Atom]) -> Option<(&'a str, Vec<&'a Atom>)> {
-    if items.len() != 2 || !is_sym(&items[0], "Predicate") {
-        return None;
-    }
+    if items.len() != 2 || !is_sym(&items[0], "Predicate") { return None; }
     match &items[1] {
         Atom::Expr(inner) => match inner.first() {
             Some(Atom::Sym(head)) => Some((head.as_str(), inner[1..].iter().collect())),
@@ -186,9 +184,7 @@ pub fn term_to_atom(
 ) -> Result<Atom, PrologError> {
     match unsafe { api.term_type(term) } {
         PL_VARIABLE => {
-            if let Some(name) = reverse_vars.get(&term) {
-                return Ok(Atom::sym(name));
-            }
+            if let Some(name) = reverse_vars.get(&term) { return Ok(Atom::sym(name)); }
             let name = format!("$_V{term}");
             reverse_vars.insert(term, name.clone());
             Ok(Atom::sym(&name))
@@ -200,9 +196,7 @@ pub fn term_to_atom(
         PL_STRING => Ok(Atom::str_val(&get_str(api, term, CVT_STRING)?)),
         PL_INTEGER => {
             let mut val: i64 = 0;
-            if unsafe { api.get_int64(term, &mut val) } != 0 {
-                return Ok(Atom::num(val as i128));
-            }
+            if unsafe { api.get_int64(term, &mut val) } != 0 { return Ok(Atom::num(val as i128)); }
             if let Ok(s) = get_str(api, term, CVT_INTEGER) {
                 if let Ok(ibig) = dashu::integer::IBig::from_str_radix(&s, 10) {
                     return Ok(Atom::Num(Numeric::Int(ibig)));
@@ -224,9 +218,7 @@ pub fn term_to_atom(
             let tail = unsafe { api.new_term_ref() };
             let mut current = term;
             while unsafe { api.term_type(current) } == PL_LIST_PAIR {
-                if unsafe { api.get_list(current, head, tail) } == 0 {
-                    break;
-                }
+                if unsafe { api.get_list(current, head, tail) } == 0 { break; }
                 elements.push(term_to_atom(head, api, reverse_vars)?);
                 current = tail;
             }

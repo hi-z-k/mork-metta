@@ -24,17 +24,12 @@ pub fn eval_translate_predicate_atom(
     for solution in solutions {
         let mut env = base_env.clone();
         for (vname, vval) in solution {
-            if matches!(&vval, Atom::Sym(s) if s.starts_with("$_V")) {
-                continue;
-            }
+            if matches!(&vval, Atom::Sym(s) if s.starts_with("$_V")) { continue; }
             env = env.extend(&vname, vval.clone());
             for (orig_name, fresh) in free_vars_map.iter().zip(free_vars_bindings) {
                 let Atom::Sym(fresh_s) = fresh else { continue };
-                if orig_name == &vname {
-                    env = env.extend(fresh_s, vval.clone());
-                } else if fresh_s.as_str() == vname {
-                    env = env.extend(orig_name, vval.clone());
-                }
+                if orig_name == &vname { env = env.extend(fresh_s, vval.clone()); }
+                else if fresh_s.as_str() == vname { env = env.extend(orig_name, vval.clone()); }
             }
         }
         envs.push((Atom::sym("true"), env));
@@ -58,9 +53,7 @@ fn gather_bindings(
                 None => break,
             },
             EnvNode::Cons { name, value, next } => {
-                if seen.insert(name.to_string()) {
-                    bindings.push((name.to_string(), (**value).clone()));
-                }
+                if seen.insert(name.to_string()) { bindings.push((name.to_string(), (**value).clone())); }
                 curr = next.clone();
             }
             EnvNode::Link { prefix, base } => {
@@ -72,12 +65,8 @@ fn gather_bindings(
     for (idx, name) in free_vars_map.iter().enumerate() {
         let Some(Atom::Sym(fresh_s)) = free_vars_bindings.get(idx) else { continue };
         let Some(bound_val) = lookup(base_env, fresh_s) else { continue };
-        if seen.insert(name.clone()) {
-            bindings.push((name.clone(), bound_val.clone()));
-        }
-        if seen.insert(fresh_s.to_string()) {
-            bindings.push((fresh_s.to_string(), bound_val));
-        }
+        if seen.insert(name.clone()) { bindings.push((name.clone(), bound_val.clone())); }
+        if seen.insert(fresh_s.to_string()) { bindings.push((fresh_s.to_string(), bound_val)); }
     }
     bindings
 }
