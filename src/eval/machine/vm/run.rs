@@ -2261,16 +2261,7 @@ fn run_vm_inner(
                     })?;
                     #[cfg(feature = "prolog-bridge")]
                     {
-                        use crate::eval::prolog::thread::{client, PrologCommand, PrologReply};
-                        let client = client().map_err(|e| e.to_string())?;
-                        match client.request(PrologCommand::Consult {
-                            path: _resolved.to_string_lossy().to_string(),
-                        }) {
-                            Ok(PrologReply::Ack) => {}
-                            Ok(PrologReply::Error(err)) => return Err(err.to_string()),
-                            Err(e) => return Err(e.to_string()),
-                            _ => return Err("Prolog consult failed".into()),
-                        }
+                        crate::eval::prolog::vm::consult_file(&_resolved.to_string_lossy())?;
                         state.stack.push(plain(vec![Atom::sym("true")]));
                         state.ip += 1;
                     }
@@ -2279,181 +2270,34 @@ fn run_vm_inner(
                         return Err("prolog-bridge feature not enabled".into());
                     }
                 }
-                Opcode::TranslatePredicate { goal: _goal, free_vars_map: _ } => {
+                Opcode::TranslatePredicate {
+                    goal,
+                    free_vars_map: _,
+                } => {
                     #[cfg(feature = "prolog-bridge")]
                     {
-                        use crate::eval::prolog::thread::{client, PrologCommand, PrologReply};
-                        let client = client().map_err(|e| e.to_string())?;
-
-                        let goal_atom_raw = crate::parser::expr_to_atom(&_goal);
-                        let goal_sexpr = goal_atom_raw.to_sexpr_string();
-                        if goal_sexpr.contains("&self") {
-                            static LAST_SYNCED_STAMP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
-                            let current_stamp = funcs.memo_stamp.load(std::sync::atomic::Ordering::Relaxed);
-                            if LAST_SYNCED_STAMP.swap(current_stamp, std::sync::atomic::Ordering::Relaxed) != current_stamp {
+                        let goal_atom_raw = crate::parser::expr_to_atom(&goal);
+                        if goal_atom_raw.to_sexpr_string().contains("&self") {
+                            static LAST_SYNCED_STAMP: std::sync::atomic::AtomicU64 =
+                                std::sync::atomic::AtomicU64::new(u64::MAX);
+                            let current_stamp =
+                                funcs.memo_stamp.load(std::sync::atomic::Ordering::Relaxed);
+                            if LAST_SYNCED_STAMP
+                                .swap(current_stamp, std::sync::atomic::Ordering::Relaxed)
+                                != current_stamp
+                            {
                                 let space_atoms = funcs.space.read().unwrap().get_atoms();
-                                let _ = client.request(PrologCommand::SyncSpace { atoms: space_atoms });
+                                let _ = crate::eval::prolog::vm::sync_space(&space_atoms);
                             }
                         }
 
-                        // Substitute bound variables into the goal expression without eager function evaluation
-                        let subst_expr = |expr: &Expr| -> Atom {
-                            fn rec(
-                                e: &Expr,
-                                env: &Env,
-                                fv_map: &[String],
-                                fv_bind: &[Atom],
-                            ) -> Atom {
-                                match e {
-                                    Expr::Symbol(s) if s.starts_with('$') => {
-                                        if let Some(val) = lookup(env, s) {
-                                            val
-                                        } else if let Some(pos) = fv_map.iter().position(|x| x == s) {
-                                            if let Some(fresh_sym) = fv_bind.get(pos) {
-                                                if let Atom::Sym(fresh_s) = fresh_sym {
-                                                    if let Some(val) = lookup(env, fresh_s) {
-                                                        val
-                                                    } else {
-                                                        fresh_sym.clone()
-                                                    }
-                                                } else {
-                                                    fresh_sym.clone()
-                                                }
-                                            } else {
-                                                Atom::sym(s)
-                                            }
-                                        } else {
-                                            Atom::sym(s)
-                                        }
-                                    }
-                                    Expr::Symbol(s) => Atom::sym(s),
-                                    Expr::Str(s) => Atom::str_val(s),
-                                    Expr::Number(n) => Atom::Num(n.clone()),
-                                    Expr::List(items) => {
-                                        let atom_items: Vec<Atom> = items
-                                            .iter()
-                                            .map(|item| rec(item, env, fv_map, fv_bind))
-                                            .collect();
-                                        Atom::expr(atom_items)
-                                    }
-                                }
-                            }
-                            rec(expr, &base_env, &state.free_vars_map, &state.free_vars_bindings)
-                        };
-
-                        let (head_str, evaluated_args) = match &_goal {
-                            Expr::List(items) if !items.is_empty() => {
-                                let head = match &items[0] {
-                                    Expr::Symbol(s) => s.clone(),
-                                    Expr::Str(s) => s.clone(),
-                                    other => other.to_string(),
-                                };
-                                let args: Vec<Atom> = items[1..].iter().map(|arg| subst_expr(arg)).collect();
-                                (head, args)
-                            }
-                            _ => {
-                                let a = subst_expr(&_goal);
-                                (a.to_sexpr_string(), Vec::new())
-                            }
-                        };
-
-                        let evaluated_goal = if evaluated_args.is_empty() {
-                            Atom::sym(&head_str)
-                        } else {
-                            let mut list = vec![Atom::sym(&head_str)];
-                            list.extend(evaluated_args);
-                            Atom::expr(list)
-                        };
-
-                        // Gather in_bindings from base_env and state.free_vars
-                        let mut in_bindings: Vec<(String, Atom)> = Vec::new();
-                        let mut curr = base_env.clone();
-                        let mut seen = std::collections::HashSet::new();
-                        let mut todo = Vec::new();
-                        loop {
-                            match curr.inner() {
-                                crate::env::EnvNode::Empty => {
-                                    if let Some(next) = todo.pop() {
-                                        curr = next;
-                                        continue;
-                                    }
-                                    break;
-                                }
-                                crate::env::EnvNode::Cons { name, value, next } => {
-                                    if seen.insert(name.to_string()) {
-                                        in_bindings.push((name.to_string(), (**value).clone()));
-                                    }
-                                    curr = next.clone();
-                                }
-                                crate::env::EnvNode::Link { prefix, base } => {
-                                    todo.push(base.clone());
-                                    curr = prefix.clone();
-                                }
-                            }
-                        }
-                        for (idx, name) in state.free_vars_map.iter().enumerate() {
-                            if let Some(val) = state.free_vars_bindings.get(idx) {
-                                if let Atom::Sym(fresh_s) = val {
-                                    if let Some(bound_val) = lookup(&base_env, fresh_s) {
-                                        if seen.insert(name.clone()) {
-                                            in_bindings.push((name.clone(), bound_val.clone()));
-                                        }
-                                        if seen.insert(fresh_s.to_string()) {
-                                            in_bindings.push((fresh_s.to_string(), bound_val));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        match client.request(PrologCommand::Translate {
-                            goal: evaluated_goal,
-                            in_bindings,
-                        }) {
-                            Ok(PrologReply::TranslateSolutions(solutions)) => {
-                                if solutions.is_empty() {
-                                    state.stack.push(Vec::new());
-                                } else {
-                                    let mut rs: ResultSet = Vec::with_capacity(solutions.len());
-                                    for sol in solutions {
-                                        let mut env = base_env.clone();
-                                        for (vname, vval) in sol {
-                                            let is_unbound_dummy = if let Atom::Sym(ref s) = vval {
-                                                s.starts_with("$_V")
-                                            } else {
-                                                false
-                                            };
-                                            if !is_unbound_dummy {
-                                                env = env.extend(&vname, vval.clone());
-                                                for (idx, orig_name) in state.free_vars_map.iter().enumerate() {
-                                                    if orig_name == &vname {
-                                                        if let Some(Atom::Sym(fresh_s)) = state.free_vars_bindings.get(idx) {
-                                                            env = env.extend(fresh_s, vval.clone());
-                                                        }
-                                                    }
-                                                    if let Some(Atom::Sym(fresh_s)) = state.free_vars_bindings.get(idx) {
-                                                        if fresh_s.as_str() == vname.as_str() {
-                                                            env = env.extend(orig_name, vval.clone());
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        rs.push((Atom::sym("true"), env));
-                                    }
-                                    state.stack.push(rs);
-                                }
-                            }
-                            Ok(PrologReply::Error(err)) => {
-                                return Err(err.to_string());
-                            }
-                            Err(e) => {
-                                return Err(e.to_string());
-                            }
-                            _ => {
-                                state.stack.push(Vec::new());
-                            }
-                        }
+                        let rs = crate::eval::prolog::vm::eval_translate_predicate(
+                            &goal,
+                            &base_env,
+                            &state.free_vars_map,
+                            &state.free_vars_bindings,
+                        )?;
+                        state.stack.push(rs);
                         state.ip += 1;
                     }
                     #[cfg(not(feature = "prolog-bridge"))]
@@ -2585,16 +2429,7 @@ fn run_vm_inner(
                         })?;
                         #[cfg(feature = "prolog-bridge")]
                         {
-                            use crate::eval::prolog::thread::{client, PrologCommand, PrologReply};
-                            let client = client().map_err(|e| e.to_string())?;
-                            match client.request(PrologCommand::Consult {
-                                path: _resolved.to_string_lossy().to_string(),
-                            }) {
-                                Ok(PrologReply::Ack) => {}
-                                Ok(PrologReply::Error(err)) => return Err(err.to_string()),
-                                Err(e) => return Err(e.to_string()),
-                                _ => return Err("Prolog consult failed".into()),
-                            }
+                            crate::eval::prolog::vm::consult_file(&_resolved.to_string_lossy())?;
                             state.stack.push(plain(vec![Atom::sym("true")]));
                         }
                         #[cfg(not(feature = "prolog-bridge"))]

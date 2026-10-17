@@ -8,7 +8,7 @@
 //! 3. Shared library names: `libswipl.so.10`, `libswipl.so.9`, `libswipl.so.8`,
 //!    `libswipl.so`, `libswipl.dylib`
 
-use std::ffi::{c_char, c_int, c_long, c_uint, c_void, CString};
+use std::ffi::{c_char, c_int, c_uint, c_void, CString};
 use std::path::Path;
 use std::sync::OnceLock;
 

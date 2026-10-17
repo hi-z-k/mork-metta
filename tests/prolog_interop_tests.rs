@@ -306,10 +306,7 @@ mod interop_tests {
         let pl_path = temp_dir.join("stream_drop.pl");
         std::fs::write(&pl_path, "my_range(X) :- between(1, 1000, X).\n").unwrap();
 
-        let client_ref = mork_metta::eval::prolog::thread::client().unwrap();
-        client_ref.request(mork_metta::eval::prolog::thread::PrologCommand::Consult {
-            path: pl_path.to_string_lossy().to_string(),
-        }).unwrap();
+        mork_metta::eval::prolog::ops::consult_file(&pl_path.to_string_lossy()).unwrap();
 
         let mut rt = Runtime::new();
         rt.eval_str("!(import_prolog_function my_range)").unwrap();
@@ -355,10 +352,7 @@ mod interop_tests {
         let pl_path = temp_dir.join("small_range.pl");
         std::fs::write(&pl_path, "small_range(X) :- between(1, 5, X).\n").unwrap();
 
-        let client_ref = mork_metta::eval::prolog::thread::client().unwrap();
-        client_ref.request(mork_metta::eval::prolog::thread::PrologCommand::Consult {
-            path: pl_path.to_string_lossy().to_string(),
-        }).unwrap();
+        mork_metta::eval::prolog::ops::consult_file(&pl_path.to_string_lossy()).unwrap();
 
         let mut rt = Runtime::new();
         rt.eval_str("!(import_prolog_function small_range)").unwrap();
@@ -382,14 +376,10 @@ mod interop_tests {
         let pl_path = temp_dir.join("always_fails.pl");
         std::fs::write(&pl_path, "always_fails(_) :- fail.\n").unwrap();
 
-        let client_ref = mork_metta::eval::prolog::thread::client().unwrap();
-        client_ref.request(mork_metta::eval::prolog::thread::PrologCommand::Consult {
-            path: pl_path.to_string_lossy().to_string(),
-        }).unwrap();
+        mork_metta::eval::prolog::ops::consult_file(&pl_path.to_string_lossy()).unwrap();
 
-        let arities_reply = client_ref.request(mork_metta::eval::prolog::thread::PrologCommand::CurrentArities {
-            name: "always_fails".to_string(),
-        }).unwrap();
+        let arities_reply =
+            mork_metta::eval::prolog::ops::current_arities("always_fails").unwrap();
         println!("always_fails arities_reply: {:?}", arities_reply);
 
         let mut rt = Runtime::new();
@@ -478,7 +468,7 @@ mod interop_tests {
     fn interop_foreign_blob_term() {
         let _guard = INTEROP_LOCK.lock().unwrap();
         if !ensure_prolog() { return; }
-        let _client_ref = mork_metta::eval::prolog::thread::client().unwrap();
+        let _engine_manager = mork_metta::eval::prolog::engine::EngineManager::get().unwrap();
 
         // Query open_string to get a stream blob
         let mut rt = Runtime::new();

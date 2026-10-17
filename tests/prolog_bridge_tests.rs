@@ -25,15 +25,16 @@ mod tests {
     }
 
     #[test]
-    fn prolog_worker_thread_ping() {
+    fn prolog_engine_manager_ping() {
         let _guard = TEST_LOCK.lock().unwrap();
         if !swipl_available() {
             eprintln!("skipping: SWI-Prolog not available");
             return;
         }
-        use mork_metta::eval::prolog::thread::client;
-        let client = client().expect("Prolog client should be available");
-        client.ping().expect("Ping should succeed");
+        use mork_metta::eval::prolog::engine::EngineManager;
+        let manager = EngineManager::get().expect("Prolog engine manager should be available");
+        let engine = manager.checkout().expect("Checkout should succeed");
+        engine.return_early();
     }
 
     #[test]

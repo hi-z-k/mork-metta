@@ -7,8 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::atom::Grounded;
 use crate::eval::prolog::error::PrologError;
-use crate::eval::prolog::ffi::{Api, record_t};
-use crate::eval::prolog::thread::{PrologCommand, PrologReply};
+use crate::eval::prolog::ffi::record_t;
 
 /// Global counter for generating unique foreign term IDs.
 static FOREIGN_ID_COUNTER: AtomicUsize = AtomicUsize::new(1);

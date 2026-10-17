@@ -36,6 +36,12 @@ impl fmt::Display for PrologError {
 
 impl std::error::Error for PrologError {}
 
+impl From<std::ffi::NulError> for PrologError {
+    fn from(e: std::ffi::NulError) -> Self {
+        PrologError::Conversion(e.to_string())
+    }
+}
+
 impl PrologError {
     /// Convert this error into a MeTTa `(Error <context> "<message>")` atom.
     pub fn to_error_atom(&self, context: &crate::atom::Atom) -> crate::atom::Atom {

@@ -10,6 +10,5 @@ pub mod error;
 pub mod ffi;
 pub mod handle;
 pub mod ops;
-pub mod query;
 pub mod stream;
-pub mod thread;
+pub mod vm;
