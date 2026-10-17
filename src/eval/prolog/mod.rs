@@ -1,7 +1,5 @@
 //! SWI-Prolog bridge (enabled by the `prolog-bridge` feature).
-//!
-//! See `docs/prolog-bridge.md` for the architecture. All submodules are
-//! introduced incrementally.
+//! See `docs/prolog-bridge.md` for the architecture.
 
 pub mod builtins;
 pub mod convert;

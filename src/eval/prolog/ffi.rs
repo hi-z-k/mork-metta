@@ -1,9 +1,9 @@
 //! Dynamic loading of `libswipl` and typed FFI bindings.
 //!
-//! Declaration order: `MORK_METTA_LIBSWIPL` env var, then
-//! `swipl --dump-runtime-variables`, then common shared library names.
+//! Search order: `MORK_METTA_LIBSWIPL` env var, `swipl --dump-runtime-variables`,
+//! then common shared library names.
 
-use std::ffi::{c_char, c_int, c_uint, c_void, CString};
+use std::ffi::{CString, c_char, c_int, c_uint, c_void};
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -12,8 +12,6 @@ use dlopen2::wrapper::{Container, WrapperApi};
 use crate::eval::prolog::error::PrologError;
 
 pub type PL_engine_t = usize;
-pub const PL_ENGINE_MAIN: PL_engine_t = 1;
-pub const PL_ENGINE_NONE: PL_engine_t = 0;
 pub type fid_t = usize;
 pub type term_t = usize;
 pub type atom_t = usize;
@@ -23,12 +21,14 @@ pub type predicate_t = usize;
 pub type record_t = usize;
 pub type qid_t = usize;
 
+pub const PL_ENGINE_MAIN: PL_engine_t = 1;
+pub const PL_ENGINE_NONE: PL_engine_t = 0;
+
 pub const PL_Q_NORMAL: c_int = 0x0002;
 pub const PL_Q_NODEBUG: c_int = 0x0004;
 pub const PL_Q_CATCH_EXCEPTION: c_int = 0x0008;
 pub const PL_Q_EXT_STATUS: c_int = 0x0040;
 
-pub const PL_S_FALSE: c_int = 0;
 pub const PL_S_TRUE: c_int = 1;
 pub const PL_S_LAST: c_int = 2;
 pub const PL_S_EXCEPTION: c_int = -1;
@@ -45,7 +45,6 @@ pub const PL_LIST_PAIR: c_int = 10;
 pub const CVT_ATOM: c_uint = 0x0001;
 pub const CVT_STRING: c_uint = 0x0002;
 pub const CVT_INTEGER: c_uint = 0x0008;
-pub const CVT_FLOAT: c_uint = 0x0010;
 pub const CVT_WRITE: c_uint = 0x0080;
 
 macro_rules! swipl {
@@ -129,11 +128,8 @@ impl Api {
                 argv.push(CString::new(format!("--home={home}")).unwrap().into_raw());
             }
             argv.push(std::ptr::null_mut());
-            let rc = container.initialise(
-                (argv.len() - 1) as c_int,
-                argv.as_ptr() as *mut *mut c_char,
-            );
-            if rc == 0 {
+            let argc = (argv.len() - 1) as c_int;
+            if container.initialise(argc, argv.as_ptr() as *mut *mut c_char) == 0 {
                 return Err(PrologError::InitFailed("PL_initialise returned FALSE".into()));
             }
             container.set_engine(PL_ENGINE_NONE, std::ptr::null_mut());
@@ -153,12 +149,12 @@ impl Api {
 
     fn locate_library() -> Result<String, PrologError> {
         if let Ok(path) = std::env::var("MORK_METTA_LIBSWIPL") {
-            if let Some(plbase) = Path::new(&path)
+            if let Some(base) = Path::new(&path)
                 .parent()
                 .and_then(Path::parent)
                 .and_then(Path::parent)
             {
-                unsafe { std::env::set_var("PLBASE", plbase) };
+                unsafe { std::env::set_var("PLBASE", base) };
             }
             return Ok(path);
         }
@@ -191,19 +187,20 @@ impl Api {
                     std::env::set_var("PLBASE", &base);
                 }
             }
-            if let Some(libswipl) = var("PLLIBSWIPL=") {
-                return Ok(libswipl);
+            if let Some(lib) = var("PLLIBSWIPL=") {
+                return Ok(lib);
             }
-            if let Some(libdir) = var("PLLIBDIR=") {
-                return Self::first_existing(Self::names().iter().map(|n| format!("{libdir}/{n}")))
-                    .ok_or_else(|| {
-                        PrologError::LibraryNotFound(format!("could not locate libswipl in {libdir}"))
-                    });
+            if let Some(dir) = var("PLLIBDIR=") {
+                let cands = Self::names().iter().map(|n| format!("{dir}/{n}"));
+                return Self::first_existing(cands).ok_or_else(|| {
+                    PrologError::LibraryNotFound(format!("could not locate libswipl in {dir}"))
+                });
             }
         }
-        Self::first_existing(Self::names().iter().map(|n| n.to_string())).ok_or_else(|| {
+        let cands = Self::names().iter().map(|n| n.to_string());
+        Self::first_existing(cands).ok_or_else(|| {
             PrologError::LibraryNotFound(
-                "could not locate libswipl (tried env MORK_METTA_LIBSWIPL, \
+                "could not locate libswipl (tried MORK_METTA_LIBSWIPL, \
                  swipl --dump-runtime-variables, and common shared library names)"
                     .into(),
             )

@@ -7,7 +7,6 @@ use crate::func::{FnTable, NDet};
 
 /// Register all Prolog builtins into `funcs`.
 pub fn register_prolog_builtins(funcs: &FnTable) {
-    // (Predicate (f args...)) -> (Predicate (f args...))
     funcs.insert_native("Predicate", 1, |args, _| {
         expect_n_args(args, 1, "Predicate")?;
         Ok(NDet::single(Atom::expr(vec![
@@ -16,7 +15,6 @@ pub fn register_prolog_builtins(funcs: &FnTable) {
         ])))
     });
 
-    // (callPredicate G) -> True for each solution, empty on failure
     funcs.insert_native("callPredicate", 1, |args, _| {
         expect_n_args(args, 1, "callPredicate")?;
         let solutions = ops::call_predicate_goal(&args[0]).map_err(|e| e.to_string())?;
@@ -27,7 +25,6 @@ pub fn register_prolog_builtins(funcs: &FnTable) {
         })
     });
 
-    // (succeedsPredicate G) -> True if at least one solution, else False.
     funcs.insert_native("succeedsPredicate", 1, |args, _| {
         expect_n_args(args, 1, "succeedsPredicate")?;
         let solutions = ops::call_predicate_goal(&args[0]).map_err(|e| e.to_string())?;
@@ -35,22 +32,18 @@ pub fn register_prolog_builtins(funcs: &FnTable) {
         Ok(NDet::single(Atom::sym(answer)))
     });
 
-    // (assertzPredicate G) -> True
     funcs.insert_native("assertzPredicate", 1, |args, _| {
         expect_n_args(args, 1, "assertzPredicate")?;
         ops::assertz_clause(&args[0]).map_err(|e| e.to_string())?;
         Ok(NDet::single(Atom::sym("True")))
     });
 
-    // (retractPredicate G) -> True if retracted, False otherwise
     funcs.insert_native("retractPredicate", 1, |args, _| {
         expect_n_args(args, 1, "retractPredicate")?;
         let removed = ops::retract_clause(&args[0]).map_err(|e| e.to_string())?;
-        let answer = if removed { "True" } else { "False" };
-        Ok(NDet::single(Atom::sym(answer)))
+        Ok(NDet::single(Atom::sym(if removed { "True" } else { "False" })))
     });
 
-    // (import_prolog_function name) -> True
     funcs.insert_native("import_prolog_function", 1, |args, funcs_ref| {
         expect_n_args(args, 1, "import_prolog_function")?;
         let name_str = name_arg(&args[0], "import_prolog_function")?;
@@ -70,7 +63,6 @@ pub fn register_prolog_builtins(funcs: &FnTable) {
         Ok(NDet::single(Atom::sym("True")))
     });
 
-    // (add-translator-rule! name) -> True
     funcs.insert_native("add-translator-rule!", 1, |args, funcs_ref| {
         expect_n_args(args, 1, "add-translator-rule!")?;
         let rule_name = name_arg(&args[0], "add-translator-rule!")?;
@@ -94,7 +86,7 @@ pub fn register_imported_prolog_function(funcs: &FnTable, functor: &str, arity: 
     funcs.insert_native(functor, arity, move |call_args, _| {
         match ops::call_function(&functor_name, call_args).map_err(|e| e.to_string())? {
             ops::FunctionOutcome::Single(atom) => Ok(NDet::single(atom)),
-            ops::FunctionOutcome::Stream(stream) => Ok(NDet::stream(stream)),
+            ops::FunctionOutcome::Stream(iter) => Ok(NDet::stream(iter)),
             ops::FunctionOutcome::Empty => Ok(NDet::empty()),
             ops::FunctionOutcome::Exception(msg) => Err(msg),
         }

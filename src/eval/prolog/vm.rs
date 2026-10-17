@@ -1,8 +1,4 @@
-//! Prolog-specific logic called by the shared VM.
-//!
-//! The VM keeps a thin dispatch stub (see `run.rs`); everything that knows about
-//! Prolog — consulting files, syncing `&self`, marshalling `translatePredicate`
-//! environments across the bridge — lives here.
+//! Prolog-specific logic called by the shared VM (see the `run.rs` stubs).
 
 use crate::atom::Atom;
 use crate::env::{Env, EnvNode};
@@ -10,12 +6,10 @@ use crate::eval::machine::budget::ResultSet;
 use crate::eval::prolog::ops;
 use crate::eval::shared::env::lookup;
 
-/// Consult a `.pl` file through the bridge.
 pub fn consult_file(path: &str) -> Result<(), String> {
     ops::consult_file(path).map_err(|e| e.to_string())
 }
 
-/// Push the current space atoms into Prolog's `'&self'` dynamic clauses.
 pub fn sync_space(atoms: &[Atom]) -> Result<(), String> {
     ops::sync_space(atoms).map_err(|e| e.to_string())
 }
@@ -23,7 +17,7 @@ pub fn sync_space(atoms: &[Atom]) -> Result<(), String> {
 /// Execute an already-evaluated `translatePredicate` goal and return one branch
 /// environment per Prolog solution. Unbound variables compiled to fresh
 /// `$__fresh_*` symbols are forwarded in; solution bindings are mapped back
-/// onto both the original name and its fresh counterpart.
+/// onto the original name and its fresh counterpart.
 pub fn eval_translate_predicate_atom(
     goal: &Atom,
     base_env: &Env,
@@ -32,10 +26,6 @@ pub fn eval_translate_predicate_atom(
 ) -> Result<ResultSet, String> {
     let in_bindings = gather_bindings(base_env, free_vars_map, free_vars_bindings);
     let solutions = ops::translate_goal(goal, &in_bindings).map_err(|e| e.to_string())?;
-    if solutions.is_empty() {
-        return Ok(Vec::new());
-    }
-
     let mut envs = Vec::with_capacity(solutions.len());
     for solution in solutions {
         let mut env = base_env.clone();
@@ -69,7 +59,6 @@ fn gather_bindings(
 ) -> Vec<(String, Atom)> {
     let mut bindings = Vec::new();
     let mut seen = std::collections::HashSet::new();
-
     let mut curr = base_env.clone();
     let mut todo = Vec::new();
     loop {
@@ -90,7 +79,6 @@ fn gather_bindings(
             }
         }
     }
-
     for (idx, name) in free_vars_map.iter().enumerate() {
         let Some(Atom::Sym(fresh_s)) = free_vars_bindings.get(idx) else {
             continue;
@@ -105,6 +93,5 @@ fn gather_bindings(
             bindings.push((fresh_s.to_string(), bound_val));
         }
     }
-
     bindings
 }

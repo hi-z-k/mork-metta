@@ -12,18 +12,21 @@ use crate::eval::prolog::ffi::{
 };
 use crate::eval::prolog::handle::PrologForeign;
 
-/// Map for tracking variable identity during conversion.
-/// Maps variable names (e.g., "$x") to Prolog term references.
+/// Maps variable names (e.g. `"$x"`) to Prolog term references.
 pub type VarMap = HashMap<String, term_t>;
 
 /// Strip outer `(quote ...)` from an atom.
 pub fn strip_quote_atom(atom: &Atom) -> &Atom {
     if let Atom::Expr(e) = atom {
-        if e.len() == 2 && e[0].as_sym().map(|s| s == "quote").unwrap_or(false) {
+        if e.len() == 2 && is_sym(&e[0], "quote") {
             return &e[1];
         }
     }
     atom
+}
+
+fn is_sym(a: &Atom, name: &str) -> bool {
+    matches!(a.as_sym(), Ok(s) if s == name)
 }
 
 fn conv<T>(r: Result<T, impl ToString>) -> Result<T, PrologError> {
@@ -42,7 +45,6 @@ fn get_str(api: &Api, term: term_t, kind: c_uint) -> Result<String, PrologError>
 pub fn atom_to_term(atom: &Atom, api: &Api, var_map: &mut VarMap) -> Result<term_t, PrologError> {
     let atom = strip_quote_atom(atom);
     let term = unsafe { api.new_term_ref() };
-
     match atom {
         Atom::Sym(s) => {
             let name = s.as_str();
@@ -57,8 +59,7 @@ pub fn atom_to_term(atom: &Atom, api: &Api, var_map: &mut VarMap) -> Result<term
                 });
             }
             let c_name = CString::new(name)?;
-            let h = unsafe { api.new_atom(c_name.as_ptr()) };
-            unsafe { api.put_atom(term, h) };
+            unsafe { api.put_atom(term, api.new_atom(c_name.as_ptr())) };
         }
         Atom::Str(s) => {
             let c_s = CString::new(s.as_ref())?;
@@ -81,7 +82,7 @@ pub fn atom_to_term(atom: &Atom, api: &Api, var_map: &mut VarMap) -> Result<term
             if let Some((head, args)) = extract_predicate_compound(e) {
                 return compound(api, head, &args, var_map);
             }
-            if e.len() == 2 && e[0].as_sym().map(|s| s == "library").unwrap_or(false) {
+            if e.len() == 2 && is_sym(&e[0], "library") {
                 return compound(api, "library", &[&e[1]], var_map);
             }
             if let Some(Atom::Sym(head)) = e.first() {
@@ -94,21 +95,14 @@ pub fn atom_to_term(atom: &Atom, api: &Api, var_map: &mut VarMap) -> Result<term
         }
         Atom::Gnd(g) => {
             let Some(pf) = g.as_any().downcast_ref::<PrologForeign>() else {
-                return Err(PrologError::Conversion(
-                    "unsupported grounded type for Prolog conversion".into(),
-                ));
+                return Err(PrologError::Conversion("unsupported grounded type".into()));
             };
             if unsafe { api.recorded(pf.record, term) } == 0 {
                 return Err(PrologError::Conversion("failed to replay recorded term".into()));
             }
         }
-        _ => {
-            return Err(PrologError::Conversion(
-                "unsupported atom type for Prolog conversion".into(),
-            ));
-        }
+        _ => return Err(PrologError::Conversion("unsupported atom type".into())),
     }
-
     Ok(term)
 }
 
@@ -117,7 +111,7 @@ pub fn atom_to_term(atom: &Atom, api: &Api, var_map: &mut VarMap) -> Result<term
 pub fn goal_to_term(goal: &Atom, api: &Api, var_map: &mut VarMap) -> Result<term_t, PrologError> {
     let goal = strip_quote_atom(goal);
     if let Atom::Expr(items) = goal {
-        if items.len() == 2 && items[0].as_sym().map(|s| s == "Predicate").unwrap_or(false) {
+        if items.len() == 2 && is_sym(&items[0], "Predicate") {
             return atom_to_term(goal, api, var_map);
         }
         if let Some(Atom::Sym(head)) = items.first() {
@@ -144,39 +138,14 @@ pub fn is_prolog_operator(s: &str) -> bool {
     is_control(s)
         || matches!(
             s,
-            "+" | "-"
-                | "*"
-                | "/"
-                | "mod"
-                | "rem"
-                | "abs"
-                | "min"
-                | "max"
-                | "sqrt"
-                | "**"
-                | "^"
-                | "div"
-                | "rdiv"
-                | "="
-                | "\\="
-                | "<"
-                | ">"
-                | "=<"
-                | ">="
-                | "=:="
-                | "=\\="
+            "+" | "-" | "*" | "/" | "mod" | "rem" | "abs" | "min" | "max" | "sqrt" | "**" | "^"
+                | "div" | "rdiv" | "=" | "\\=" | "<" | ">" | "=<" | ">=" | "=:=" | "=\\="
         )
 }
 
 /// Extract a `(Predicate (f args...))` compound from an expression.
 fn extract_predicate_compound<'a>(items: &'a [Atom]) -> Option<(&'a str, Vec<&'a Atom>)> {
-    if items.len() != 2 {
-        return None;
-    }
-    let Some(Atom::Sym(s)) = items.first() else {
-        return None;
-    };
-    if s.as_str() != "Predicate" {
+    if items.len() != 2 || !is_sym(&items[0], "Predicate") {
         return None;
     }
     match &items[1] {
@@ -194,12 +163,10 @@ fn build_compound(api: &Api, head: &str, arg_terms: &[term_t]) -> Result<term_t,
     let c_head = CString::new(head)?;
     let head_atom = unsafe { api.new_atom(c_head.as_ptr()) };
     let term = unsafe { api.new_term_ref() };
-
     if arg_terms.is_empty() {
         unsafe { api.put_atom(term, head_atom) };
         return Ok(term);
     }
-
     let a0 = unsafe { api.new_term_refs(arg_terms.len() as c_int) };
     for (i, &t) in arg_terms.iter().enumerate() {
         unsafe { api.put_term(a0 + i, t) };
@@ -249,11 +216,7 @@ pub fn term_to_atom(
         }
         PL_ATOM => {
             let s = get_str(api, term, CVT_ATOM)?;
-            if s == "[]" {
-                Ok(Atom::expr(vec![]))
-            } else {
-                Ok(Atom::sym(&s))
-            }
+            Ok(if s == "[]" { Atom::expr(vec![]) } else { Atom::sym(&s) })
         }
         PL_STRING => Ok(Atom::str_val(&get_str(api, term, CVT_STRING)?)),
         PL_INTEGER => {

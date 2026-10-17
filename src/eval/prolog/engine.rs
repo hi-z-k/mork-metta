@@ -1,28 +1,22 @@
 //! Engine management: a locked main engine plus a bounded pool of worker
-//! engines used for imported functions, `callPredicate` and
-//! `translatePredicate` goals.
-//!
-//! SWI-Prolog engines are attached to at most one OS thread at a time, so the
-//! main engine (consult, assert, retract, space sync) is serialized behind a
-//! mutex. Pooled engines are checked out per operation and attached to the
-//! calling thread for the duration of that operation.
+//! engines. SWI-Prolog engines are attached to at most one OS thread at a time,
+//! so the main engine (consult, assert, retract, space sync) is serialized
+//! behind a mutex, while pooled engines attach to the calling thread for the
+//! duration of one operation.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::eval::prolog::error::PrologError;
-use crate::eval::prolog::ffi::{Api, PL_ENGINE_MAIN, PL_engine_t};
+use crate::eval::prolog::ffi::{Api, PL_ENGINE_MAIN, PL_Q_NORMAL, PL_engine_t};
 
 /// Maximum number of idle engines to keep in the pool.
 pub const MAX_IDLE_ENGINES: usize = 8;
 
 /// Engine manager handling the main engine and a pool of reusable engines.
 pub struct EngineManager {
-    /// Guards exclusive use of the main engine across threads.
     main_lock: Mutex<()>,
-    /// Idle engines available for query execution.
     idle: Mutex<Vec<PL_engine_t>>,
-    /// Number of engines currently checked out.
     checked_out: AtomicUsize,
 }
 
@@ -63,7 +57,6 @@ impl EngineManager {
         unsafe { api.set_engine(PL_ENGINE_MAIN, &mut old) };
         set_table_shared(api);
         unsafe { api.set_engine(old, std::ptr::null_mut()) };
-
         Ok(Arc::new(EngineManager {
             main_lock: Mutex::new(()),
             idle: Mutex::new(Vec::new()),
@@ -82,9 +75,7 @@ impl EngineManager {
         let api = Api::get()?;
         let engine = unsafe { api.create_engine(std::ptr::null_mut()) };
         if engine == 0 {
-            return Err(PrologError::Internal(
-                "PL_create_engine returned NULL".into(),
-            ));
+            return Err(PrologError::Internal("PL_create_engine returned NULL".into()));
         }
         let mut old: PL_engine_t = 0;
         unsafe { api.set_engine(engine, &mut old) };
@@ -95,8 +86,7 @@ impl EngineManager {
 
     /// Check out an engine from the pool for query execution.
     pub fn checkout(self: &Arc<Self>) -> Result<PooledEngine, PrologError> {
-        let engine = self.idle.lock().unwrap().pop();
-        let engine = match engine {
+        let engine = match self.idle.lock().unwrap().pop() {
             Some(engine) => engine,
             None => self.create_engine()?,
         };
@@ -107,7 +97,6 @@ impl EngineManager {
         })
     }
 
-    /// Return an engine to the pool.
     fn return_engine(&self, engine: PL_engine_t) {
         self.checked_out.fetch_sub(1, Ordering::Relaxed);
         let mut idle = self.idle.lock().unwrap();
@@ -141,7 +130,7 @@ fn set_table_shared(api: &Api) {
         let targs = api.new_term_refs(2);
         api.put_atom_chars(targs, b"table_shared\0".as_ptr() as *const _);
         api.put_atom_chars(targs + 1, b"true\0".as_ptr() as *const _);
-        let q = api.open_query(0, crate::eval::prolog::ffi::PL_Q_NORMAL, p_set_flag, targs);
+        let q = api.open_query(0, PL_Q_NORMAL, p_set_flag, targs);
         if q != 0 {
             api.next_solution(q);
             api.close_query(q);
@@ -157,12 +146,10 @@ pub struct PooledEngine {
 }
 
 impl PooledEngine {
-    /// Get the engine handle.
     pub fn engine(&self) -> PL_engine_t {
         self.engine.unwrap()
     }
 
-    /// Manually return the engine to the pool early.
     pub fn return_early(mut self) {
         if let Some(engine) = self.engine.take() {
             self.manager.return_engine(engine);
