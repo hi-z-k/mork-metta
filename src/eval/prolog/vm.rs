@@ -1,5 +1,3 @@
-//! Prolog-specific logic called by the shared VM (see the `run.rs` stubs).
-
 use crate::atom::Atom;
 use crate::env::{Env, EnvNode};
 use crate::eval::machine::budget::ResultSet;
@@ -14,10 +12,6 @@ pub fn sync_space(atoms: &[Atom]) -> Result<(), String> {
     ops::sync_space(atoms).map_err(|e| e.to_string())
 }
 
-/// Execute an already-evaluated `translatePredicate` goal and return one branch
-/// environment per Prolog solution. Unbound variables compiled to fresh
-/// `$__fresh_*` symbols are forwarded in; solution bindings are mapped back
-/// onto the original name and its fresh counterpart.
 pub fn eval_translate_predicate_atom(
     goal: &Atom,
     base_env: &Env,
@@ -35,9 +29,7 @@ pub fn eval_translate_predicate_atom(
             }
             env = env.extend(&vname, vval.clone());
             for (orig_name, fresh) in free_vars_map.iter().zip(free_vars_bindings) {
-                let Atom::Sym(fresh_s) = fresh else {
-                    continue;
-                };
+                let Atom::Sym(fresh_s) = fresh else { continue };
                 if orig_name == &vname {
                     env = env.extend(fresh_s, vval.clone());
                 } else if fresh_s.as_str() == vname {
@@ -50,8 +42,6 @@ pub fn eval_translate_predicate_atom(
     Ok(envs)
 }
 
-/// Flatten the MeTTa environment plus fresh free-variable bindings into the
-/// `(name, value)` pairs forwarded to Prolog.
 fn gather_bindings(
     base_env: &Env,
     free_vars_map: &[String],
@@ -80,12 +70,8 @@ fn gather_bindings(
         }
     }
     for (idx, name) in free_vars_map.iter().enumerate() {
-        let Some(Atom::Sym(fresh_s)) = free_vars_bindings.get(idx) else {
-            continue;
-        };
-        let Some(bound_val) = lookup(base_env, fresh_s) else {
-            continue;
-        };
+        let Some(Atom::Sym(fresh_s)) = free_vars_bindings.get(idx) else { continue };
+        let Some(bound_val) = lookup(base_env, fresh_s) else { continue };
         if seen.insert(name.clone()) {
             bindings.push((name.clone(), bound_val.clone()));
         }

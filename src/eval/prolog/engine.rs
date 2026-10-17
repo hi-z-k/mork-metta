@@ -1,26 +1,17 @@
-//! Engine management: a locked main engine plus a bounded pool of worker
-//! engines. SWI-Prolog engines are attached to at most one OS thread at a time,
-//! so the main engine (consult, assert, retract, space sync) is serialized
-//! behind a mutex, while pooled engines attach to the calling thread for the
-//! duration of one operation.
-
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::eval::prolog::error::PrologError;
 use crate::eval::prolog::ffi::{Api, PL_ENGINE_MAIN, PL_Q_NORMAL, PL_engine_t};
 
-/// Maximum number of idle engines to keep in the pool.
 pub const MAX_IDLE_ENGINES: usize = 8;
 
-/// Engine manager handling the main engine and a pool of reusable engines.
 pub struct EngineManager {
     main_lock: Mutex<()>,
     idle: Mutex<Vec<PL_engine_t>>,
     checked_out: AtomicUsize,
 }
 
-/// Get or initialize the global engine manager.
 pub fn manager() -> Result<&'static Arc<EngineManager>, PrologError> {
     static MANAGER: OnceLock<Result<Arc<EngineManager>, PrologError>> = OnceLock::new();
     MANAGER
@@ -33,8 +24,6 @@ pub fn manager() -> Result<&'static Arc<EngineManager>, PrologError> {
         .map_err(Clone::clone)
 }
 
-/// Attach `engine` to the current thread, run `f`, then restore the engine
-/// that was previously attached to this thread.
 pub fn with_engine<R>(engine: PL_engine_t, f: impl FnOnce(&Api) -> R) -> Result<R, PrologError> {
     let api = Api::get()?;
     let mut old: PL_engine_t = 0;
@@ -45,14 +34,12 @@ pub fn with_engine<R>(engine: PL_engine_t, f: impl FnOnce(&Api) -> R) -> Result<
 }
 
 impl EngineManager {
-    /// Get or initialize the global engine manager.
     pub fn get() -> Result<Arc<EngineManager>, PrologError> {
         manager().map(Arc::clone)
     }
 
     fn new() -> Result<Arc<Self>, PrologError> {
         let api = Api::get()?;
-        // Enable shared tabling on the main engine.
         let mut old: PL_engine_t = 0;
         unsafe { api.set_engine(PL_ENGINE_MAIN, &mut old) };
         set_table_shared(api);
@@ -64,13 +51,11 @@ impl EngineManager {
         }))
     }
 
-    /// Run `f` with the main engine attached, exclusively.
     pub fn with_main<R>(&self, f: impl FnOnce(&Api) -> R) -> Result<R, PrologError> {
         let _guard = self.main_lock.lock().unwrap();
         with_engine(PL_ENGINE_MAIN, f)
     }
 
-    /// Create a new Prolog engine with shared tabling enabled.
     fn create_engine(&self) -> Result<PL_engine_t, PrologError> {
         let api = Api::get()?;
         let engine = unsafe { api.create_engine(std::ptr::null_mut()) };
@@ -84,17 +69,13 @@ impl EngineManager {
         Ok(engine)
     }
 
-    /// Check out an engine from the pool for query execution.
     pub fn checkout(self: &Arc<Self>) -> Result<PooledEngine, PrologError> {
         let engine = match self.idle.lock().unwrap().pop() {
             Some(engine) => engine,
             None => self.create_engine()?,
         };
         self.checked_out.fetch_add(1, Ordering::Relaxed);
-        Ok(PooledEngine {
-            manager: Arc::clone(self),
-            engine: Some(engine),
-        })
+        Ok(PooledEngine { manager: Arc::clone(self), engine: Some(engine) })
     }
 
     fn return_engine(&self, engine: PL_engine_t) {
@@ -107,18 +88,15 @@ impl EngineManager {
         }
     }
 
-    /// Number of currently checked out engines.
     pub fn checked_out_count(&self) -> usize {
         self.checked_out.load(Ordering::Relaxed)
     }
 
-    /// Number of idle engines in the pool.
     pub fn idle_count(&self) -> usize {
         self.idle.lock().unwrap().len()
     }
 }
 
-/// Enable `table_shared` on the engine attached to the current thread.
 fn set_table_shared(api: &Api) {
     unsafe {
         let frame = api.open_foreign_frame();
@@ -139,7 +117,6 @@ fn set_table_shared(api: &Api) {
     }
 }
 
-/// RAII handle for a checked-out pooled engine.
 pub struct PooledEngine {
     manager: Arc<EngineManager>,
     engine: Option<PL_engine_t>,

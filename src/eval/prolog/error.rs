@@ -1,5 +1,3 @@
-//! Prolog bridge error types.
-
 use std::fmt;
 
 #[derive(Debug, Clone)]
@@ -33,7 +31,6 @@ impl From<std::ffi::NulError> for PrologError {
 }
 
 impl PrologError {
-    /// Convert this error into a MeTTa `(Error <context> "<message>")` atom.
     pub fn to_error_atom(&self, context: &crate::atom::Atom) -> crate::atom::Atom {
         crate::atom::Atom::expr(vec![
             crate::atom::Atom::sym("Error"),

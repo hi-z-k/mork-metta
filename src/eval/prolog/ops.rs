@@ -1,6 +1,3 @@
-//! Internal Prolog operations: pooled engines for one-shot queries and
-//! imports, the mutex-guarded main engine for mutations.
-
 use std::collections::{BTreeSet, HashMap};
 use std::ffi::{CStr, CString, c_char, c_int};
 use std::sync::Arc;
@@ -65,8 +62,6 @@ fn open_call(api: &Api, goal: term_t) -> Result<qid_t, PrologError> {
     }
 }
 
-/// Run `pred(args)` once on the currently attached engine; returns the raw
-/// `PL_S_*` status, mapping thrown exceptions to `PrologError::Exception`.
 fn run_once(
     api: &Api,
     name: &[u8],
@@ -90,7 +85,6 @@ fn run_once(
     }
 }
 
-/// Run `f` on the main engine inside a foreign frame that is always discarded.
 fn with_main_frame<R>(f: impl FnOnce(&Api) -> Result<R, PrologError>) -> Result<R, PrologError> {
     engine::manager()?.with_main(|api| {
         let frame = unsafe { api.open_foreign_frame() };
@@ -100,7 +94,6 @@ fn with_main_frame<R>(f: impl FnOnce(&Api) -> Result<R, PrologError>) -> Result<
     })?
 }
 
-/// Load Prolog support clauses and space declarations on the main engine.
 pub fn init_support(manager: &Arc<EngineManager>) -> Result<(), PrologError> {
     let code = r#"
 :- dynamic '&self'/1, '&self'/2, '&self'/3, '&self'/4, '&self'/5, '&self'/6, '&self'/7, '&self'/8.
@@ -120,7 +113,6 @@ user:file_search_path(library, 'lib').
     load_prolog_code(manager, code)
 }
 
-/// Load a string of Prolog code into the `user` module on the main engine.
 pub fn load_prolog_code(manager: &Arc<EngineManager>, code: &str) -> Result<(), PrologError> {
     manager.with_main(|api| -> Result<(), PrologError> {
         unsafe {
@@ -157,8 +149,6 @@ pub fn load_prolog_code(manager: &Arc<EngineManager>, code: &str) -> Result<(), 
     })?
 }
 
-/// Check out a pooled engine, open `call(Goal)`, and collect one value per
-/// solution produced by `on_solution`.
 fn run_goal<T>(
     goal: &Atom,
     in_bindings: &[(String, Atom)],
@@ -199,12 +189,10 @@ fn run_goal<T>(
     })?
 }
 
-/// Execute `call(Goal)` and return `true` per solution.
 pub fn call_predicate_goal(goal: &Atom) -> Result<Vec<Atom>, PrologError> {
     run_goal(goal, &[], |_, _| Atom::sym("true"))
 }
 
-/// Call an imported Prolog function `functor(args..., Result)`.
 pub fn call_function(functor_name: &str, args: &[Atom]) -> Result<FunctionOutcome, PrologError> {
     let pooled = engine::manager()?.checkout()?;
     let api = Api::get()?;
@@ -218,8 +206,7 @@ pub fn call_function(functor_name: &str, args: &[Atom]) -> Result<FunctionOutcom
         let arity = args.len() + 1;
         let a0 = api.new_term_refs(arity as c_int);
         for (i, arg) in args.iter().enumerate() {
-            let t = atom_to_term(arg, api, &mut var_map)?;
-            api.put_term(a0 + i, t);
+            api.put_term(a0 + i, atom_to_term(arg, api, &mut var_map)?);
         }
         let result_term = a0 + args.len();
         api.put_variable(result_term);
@@ -229,18 +216,14 @@ pub fn call_function(functor_name: &str, args: &[Atom]) -> Result<FunctionOutcom
             api.discard_foreign_frame(frame);
             return Err(PrologError::Conversion("failed to build function goal".into()));
         }
-
         let qid = open_call(api, goal_term)?;
         let outcome: Result<FunctionOutcome, PrologError> = match next_solution(api, qid) {
-            StepStatus::Last => {
-                Ok(FunctionOutcome::Single(term_to_atom(result_term, api, &mut HashMap::new())?))
-            }
+            StepStatus::Last => Ok(FunctionOutcome::Single(term_to_atom(result_term, api, &mut HashMap::new())?)),
             StepStatus::False => Ok(FunctionOutcome::Empty),
             StepStatus::Exception(msg) => Ok(FunctionOutcome::Exception(msg)),
             StepStatus::True => {
                 let first = term_to_atom(result_term, api, &mut HashMap::new())?;
-                let rest = collect_rest(api, qid, result_term, first);
-                Ok(FunctionOutcome::Stream(rest.into_iter()))
+                Ok(FunctionOutcome::Stream(collect_rest(api, qid, result_term, first).into_iter()))
             }
         };
         api.close_query(qid);
@@ -252,8 +235,6 @@ pub fn call_function(functor_name: &str, args: &[Atom]) -> Result<FunctionOutcom
     Ok(outcome)
 }
 
-/// Eagerly drain the remaining solutions of a query that already produced
-/// `first`, mapping mid-stream failures to `(Error prolog_stream "...")` atoms.
 fn collect_rest(api: &Api, qid: qid_t, result: term_t, first: Atom) -> Vec<Atom> {
     let mut out = vec![first];
     loop {
@@ -281,7 +262,6 @@ fn collect_rest(api: &Api, qid: qid_t, result: term_t, first: Atom) -> Vec<Atom>
     out
 }
 
-/// Assert a clause at the back (`assertz/1`) on the main engine.
 pub fn assertz_clause(clause: &Atom) -> Result<(), PrologError> {
     with_main_frame(|api| {
         let t = goal_to_term(clause, api, &mut VarMap::new())?;
@@ -289,7 +269,6 @@ pub fn assertz_clause(clause: &Atom) -> Result<(), PrologError> {
     })
 }
 
-/// Remove the first matching clause (`retract/1`); returns whether it matched.
 pub fn retract_clause(clause: &Atom) -> Result<bool, PrologError> {
     with_main_frame(|api| {
         let t = goal_to_term(clause, api, &mut VarMap::new())?;
@@ -297,7 +276,6 @@ pub fn retract_clause(clause: &Atom) -> Result<bool, PrologError> {
     })
 }
 
-/// Consult a Prolog file on the main engine.
 pub fn consult_file(path: &str) -> Result<(), PrologError> {
     with_main_frame(|api| {
         let c_path = CString::new(path)?;
@@ -311,7 +289,6 @@ pub fn consult_file(path: &str) -> Result<(), PrologError> {
     })
 }
 
-/// Find all defined arities for a predicate name in the `user` module.
 pub fn current_arities(name: &str) -> Result<Vec<usize>, PrologError> {
     let pooled = engine::manager()?.checkout()?;
     with_engine(pooled.engine(), |api| -> Result<Vec<usize>, PrologError> {
@@ -342,8 +319,6 @@ pub fn current_arities(name: &str) -> Result<Vec<usize>, PrologError> {
     })?
 }
 
-/// Execute `translatePredicate` with input bindings, returning one binding set
-/// per Prolog solution.
 pub fn translate_goal(
     goal: &Atom,
     in_bindings: &[(String, Atom)],
@@ -351,7 +326,6 @@ pub fn translate_goal(
     run_goal(goal, in_bindings, collect_bindings)
 }
 
-/// Convert every variable in `var_map` back into a MeTTa atom.
 fn collect_bindings(api: &Api, var_map: &VarMap) -> Vec<(String, Atom)> {
     let mut rev_map = HashMap::new();
     var_map
@@ -364,7 +338,6 @@ fn collect_bindings(api: &Api, var_map: &VarMap) -> Vec<(String, Atom)> {
         .collect()
 }
 
-/// Sync space atoms into Prolog dynamic clauses for `'&self'` on the main engine.
 pub fn sync_space(atoms: &[Atom]) -> Result<(), PrologError> {
     with_main_frame(|api| unsafe {
         let c_code = CString::new(
@@ -382,17 +355,14 @@ pub fn sync_space(atoms: &[Atom]) -> Result<(), PrologError> {
             }
             let mut var_map = VarMap::new();
             let a0 = api.new_term_refs(items.len() as c_int);
-            if items
-                .iter()
-                .enumerate()
-                .any(|(i, it)| match atom_to_term(it, api, &mut var_map) {
-                    Ok(t) => {
-                        api.put_term(a0 + i, t);
-                        false
-                    }
-                    Err(_) => true,
-                })
-            {
+            let bad = items.iter().enumerate().any(|(i, it)| match atom_to_term(it, api, &mut var_map) {
+                Ok(t) => {
+                    api.put_term(a0 + i, t);
+                    false
+                }
+                Err(_) => true,
+            });
+            if bad {
                 continue;
             }
             let clause_term = api.new_term_ref();

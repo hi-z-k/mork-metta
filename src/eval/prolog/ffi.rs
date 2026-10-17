@@ -1,8 +1,3 @@
-//! Dynamic loading of `libswipl` and typed FFI bindings.
-//!
-//! Search order: `MORK_METTA_LIBSWIPL` env var, `swipl --dump-runtime-variables`,
-//! then common shared library names.
-
 use std::ffi::{CString, c_char, c_int, c_uint, c_void};
 use std::path::Path;
 use std::sync::OnceLock;
@@ -104,11 +99,7 @@ static CONTAINER: OnceLock<Result<Container<Api>, PrologError>> = OnceLock::new(
 
 impl Api {
     pub fn get() -> Result<&'static Api, PrologError> {
-        CONTAINER
-            .get_or_init(Self::load)
-            .as_ref()
-            .map(|c| &**c)
-            .map_err(Clone::clone)
+        CONTAINER.get_or_init(Self::load).as_ref().map(|c| &**c).map_err(Clone::clone)
     }
 
     fn load() -> Result<Container<Api>, PrologError> {
@@ -117,9 +108,8 @@ impl Api {
                 std::env::set_var("SWI_HOME_DIR", &base);
             }
             let path = Self::locate_library()?;
-            let container: Container<Api> = Container::load(&path).map_err(|e| {
-                PrologError::LibraryNotFound(format!("failed to load '{path}': {e}"))
-            })?;
+            let container: Container<Api> = Container::load(&path)
+                .map_err(|e| PrologError::LibraryNotFound(format!("failed to load '{path}': {e}")))?;
             let mut argv: Vec<*mut c_char> = ["swipl", "-q", "--nosignals"]
                 .iter()
                 .map(|a| CString::new(*a).unwrap().into_raw())
@@ -138,33 +128,19 @@ impl Api {
     }
 
     fn names() -> &'static [&'static str] {
-        &[
-            "libswipl.so.10",
-            "libswipl.so.9",
-            "libswipl.so.8",
-            "libswipl.so",
-            "libswipl.dylib",
-        ]
+        &["libswipl.so.10", "libswipl.so.9", "libswipl.so.8", "libswipl.so", "libswipl.dylib"]
     }
 
     fn locate_library() -> Result<String, PrologError> {
         if let Ok(path) = std::env::var("MORK_METTA_LIBSWIPL") {
-            if let Some(base) = Path::new(&path)
-                .parent()
-                .and_then(Path::parent)
-                .and_then(Path::parent)
-            {
+            if let Some(base) = Path::new(&path).parent().and_then(Path::parent).and_then(Path::parent) {
                 unsafe { std::env::set_var("PLBASE", base) };
             }
             return Ok(path);
         }
-        let home_bin = std::env::var("HOME")
-            .map(|h| format!("{h}/.local/bin/swipl"))
-            .unwrap_or_default();
+        let home_bin = std::env::var("HOME").map(|h| format!("{h}/.local/bin/swipl")).unwrap_or_default();
         for swipl_bin in ["swipl", &home_bin, "/usr/bin/swipl", "/usr/local/bin/swipl"] {
-            let Ok(output) = std::process::Command::new(swipl_bin)
-                .arg("--dump-runtime-variables")
-                .output()
+            let Ok(output) = std::process::Command::new(swipl_bin).arg("--dump-runtime-variables").output()
             else {
                 continue;
             };
@@ -174,11 +150,9 @@ impl Api {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let var = |key: &str| {
                 stdout.lines().find_map(|l| {
-                    l.trim().strip_prefix(key).map(|v| {
-                        v.trim_matches(|c| c == '"' || c == ';' || c == '\'')
-                            .trim()
-                            .to_string()
-                    })
+                    l.trim()
+                        .strip_prefix(key)
+                        .map(|v| v.trim_matches(|c| c == '"' || c == ';' || c == '\'').trim().to_string())
                 })
             };
             if let Some(base) = var("PLBASE=") {

@@ -1,5 +1,3 @@
-//! Opaque handle for foreign Prolog terms (`PrologForeign`).
-
 use std::any::Any;
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -7,8 +5,6 @@ use std::hash::{Hash, Hasher};
 use crate::atom::Grounded;
 use crate::eval::prolog::ffi::record_t;
 
-/// Opaque handle for a Prolog term recorded with `PL_record`.
-/// Implements `Grounded` so it can be stored in the MeTTa atomspace.
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct PrologForeign {
     pub record: record_t,

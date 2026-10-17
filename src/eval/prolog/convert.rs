@@ -1,5 +1,3 @@
-//! Conversion between MeTTa atoms and Prolog terms.
-
 use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char, c_int, c_uint};
 use std::sync::Arc;
@@ -12,17 +10,13 @@ use crate::eval::prolog::ffi::{
 };
 use crate::eval::prolog::handle::PrologForeign;
 
-/// Maps variable names (e.g. `"$x"`) to Prolog term references.
 pub type VarMap = HashMap<String, term_t>;
 
-/// Strip outer `(quote ...)` from an atom.
 pub fn strip_quote_atom(atom: &Atom) -> &Atom {
-    if let Atom::Expr(e) = atom {
-        if e.len() == 2 && is_sym(&e[0], "quote") {
-            return &e[1];
-        }
+    match atom {
+        Atom::Expr(e) if e.len() == 2 && is_sym(&e[0], "quote") => &e[1],
+        _ => atom,
     }
-    atom
 }
 
 fn is_sym(a: &Atom, name: &str) -> bool {
@@ -41,7 +35,6 @@ fn get_str(api: &Api, term: term_t, kind: c_uint) -> Result<String, PrologError>
     conv(unsafe { CStr::from_ptr(ptr) }.to_str()).map(str::to_string)
 }
 
-/// Convert a MeTTa `Atom` to a Prolog `term_t`.
 pub fn atom_to_term(atom: &Atom, api: &Api, var_map: &mut VarMap) -> Result<term_t, PrologError> {
     let atom = strip_quote_atom(atom);
     let term = unsafe { api.new_term_ref() };
@@ -58,12 +51,10 @@ pub fn atom_to_term(atom: &Atom, api: &Api, var_map: &mut VarMap) -> Result<term
                     }
                 });
             }
-            let c_name = CString::new(name)?;
-            unsafe { api.put_atom(term, api.new_atom(c_name.as_ptr())) };
+            unsafe { api.put_atom(term, api.new_atom(CString::new(name)?.as_ptr())) };
         }
         Atom::Str(s) => {
-            let c_s = CString::new(s.as_ref())?;
-            unsafe { api.put_string_chars(term, c_s.as_ptr()) };
+            unsafe { api.put_string_chars(term, CString::new(s.as_ref())?.as_ptr()) };
         }
         Atom::Num(Numeric::Int(i)) => {
             if let Ok(v) = i64::try_from(i) {
@@ -87,8 +78,7 @@ pub fn atom_to_term(atom: &Atom, api: &Api, var_map: &mut VarMap) -> Result<term
             }
             if let Some(Atom::Sym(head)) = e.first() {
                 if is_prolog_operator(head.as_str()) {
-                    let args: Vec<&Atom> = e[1..].iter().collect();
-                    return compound(api, head.as_str(), &args, var_map);
+                    return compound(api, head.as_str(), &e[1..].iter().collect::<Vec<_>>(), var_map);
                 }
             }
             return list_to_term(api, e, var_map);
@@ -106,8 +96,6 @@ pub fn atom_to_term(atom: &Atom, api: &Api, var_map: &mut VarMap) -> Result<term
     Ok(term)
 }
 
-/// Convert a MeTTa goal to a Prolog goal term. `(head args...)` becomes
-/// `head(args...)`; control operators convert their arguments as goals.
 pub fn goal_to_term(goal: &Atom, api: &Api, var_map: &mut VarMap) -> Result<term_t, PrologError> {
     let goal = strip_quote_atom(goal);
     if let Atom::Expr(items) = goal {
@@ -116,14 +104,11 @@ pub fn goal_to_term(goal: &Atom, api: &Api, var_map: &mut VarMap) -> Result<term
         }
         if let Some(Atom::Sym(head)) = items.first() {
             if is_control(head.as_str()) {
-                let terms: Result<Vec<term_t>, PrologError> = items[1..]
-                    .iter()
-                    .map(|arg| goal_to_term(arg, api, var_map))
-                    .collect();
+                let terms: Result<Vec<term_t>, PrologError> =
+                    items[1..].iter().map(|arg| goal_to_term(arg, api, var_map)).collect();
                 return build_compound(api, head.as_str(), &terms?);
             }
-            let args: Vec<&Atom> = items[1..].iter().collect();
-            return compound(api, head.as_str(), &args, var_map);
+            return compound(api, head.as_str(), &items[1..].iter().collect::<Vec<_>>(), var_map);
         }
     }
     atom_to_term(goal, api, var_map)
@@ -133,7 +118,6 @@ fn is_control(s: &str) -> bool {
     matches!(s, ":-" | "?-" | "," | ";" | "->" | "*->" | "\\+" | "not")
 }
 
-/// Returns true if symbol `s` is a standard Prolog operator/functor.
 pub fn is_prolog_operator(s: &str) -> bool {
     is_control(s)
         || matches!(
@@ -143,7 +127,6 @@ pub fn is_prolog_operator(s: &str) -> bool {
         )
 }
 
-/// Extract a `(Predicate (f args...))` compound from an expression.
 fn extract_predicate_compound<'a>(items: &'a [Atom]) -> Option<(&'a str, Vec<&'a Atom>)> {
     if items.len() != 2 || !is_sym(&items[0], "Predicate") {
         return None;
@@ -158,10 +141,8 @@ fn extract_predicate_compound<'a>(items: &'a [Atom]) -> Option<(&'a str, Vec<&'a
     }
 }
 
-/// Build a compound `head(arg_terms...)`, or the bare atom when arity is 0.
 fn build_compound(api: &Api, head: &str, arg_terms: &[term_t]) -> Result<term_t, PrologError> {
-    let c_head = CString::new(head)?;
-    let head_atom = unsafe { api.new_atom(c_head.as_ptr()) };
+    let head_atom = unsafe { api.new_atom(CString::new(head)?.as_ptr()) };
     let term = unsafe { api.new_term_ref() };
     if arg_terms.is_empty() {
         unsafe { api.put_atom(term, head_atom) };
@@ -183,7 +164,6 @@ fn compound(api: &Api, head: &str, args: &[&Atom], var_map: &mut VarMap) -> Resu
     build_compound(api, head, &terms?)
 }
 
-/// Convert a list expression to a Prolog list.
 fn list_to_term(api: &Api, items: &[Atom], var_map: &mut VarMap) -> Result<term_t, PrologError> {
     let list_term = unsafe { api.new_term_ref() };
     unsafe { api.put_nil(list_term) };
@@ -199,7 +179,6 @@ fn list_to_term(api: &Api, items: &[Atom], var_map: &mut VarMap) -> Result<term_
     Ok(current)
 }
 
-/// Convert a Prolog `term_t` to a MeTTa `Atom`.
 pub fn term_to_atom(
     term: term_t,
     api: &Api,
