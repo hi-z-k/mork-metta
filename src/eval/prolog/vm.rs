@@ -9,7 +9,6 @@ use crate::env::{Env, EnvNode};
 use crate::eval::machine::budget::ResultSet;
 use crate::eval::prolog::ops;
 use crate::eval::shared::env::lookup;
-use crate::parser::Expr;
 
 /// Consult a `.pl` file through the bridge.
 pub fn consult_file(path: &str) -> Result<(), String> {
@@ -21,24 +20,21 @@ pub fn sync_space(atoms: &[Atom]) -> Result<(), String> {
     ops::sync_space(atoms).map_err(|e| e.to_string())
 }
 
-/// Execute a `translatePredicate` goal and return one branch environment per
-/// Prolog solution, mirroring the frozen semantics:
+/// Execute an already-evaluated `translatePredicate` goal and return one branch
+/// environment per Prolog solution.
 ///
-/// * sub-terms are substituted, not eagerly reduced, and even a bare symbol
-///   goal is passed through `translate`;
-/// * every unbound variable is forwarded in and any solution binding is mapped
-///   back onto both the original name and its fresh counterpart.
-pub fn eval_translate_predicate(
-    goal: &Expr,
+/// Unbound variables were compiled to fresh `$__fresh_*` symbols and are
+/// forwarded in; solution bindings are mapped back onto both the original name
+/// and its fresh counterpart.
+pub fn eval_translate_predicate_atom(
+    goal: &Atom,
     base_env: &Env,
     free_vars_map: &[String],
     free_vars_bindings: &[Atom],
 ) -> Result<ResultSet, String> {
-    let evaluated_goal = build_goal(goal, base_env, free_vars_map, free_vars_bindings);
     let in_bindings = gather_bindings(base_env, free_vars_map, free_vars_bindings);
 
-    let solutions =
-        ops::translate_goal(&evaluated_goal, &in_bindings).map_err(|e| e.to_string())?;
+    let solutions = ops::translate_goal(goal, &in_bindings).map_err(|e| e.to_string())?;
     if solutions.is_empty() {
         return Ok(Vec::new());
     }
@@ -68,67 +64,6 @@ pub fn eval_translate_predicate(
         envs.push((Atom::sym("true"), env));
     }
     Ok(envs)
-}
-
-/// Substitute bound variables into the goal expression without evaluating.
-fn build_goal(
-    goal: &Expr,
-    base_env: &Env,
-    free_vars_map: &[String],
-    free_vars_bindings: &[Atom],
-) -> Atom {
-    fn rec(e: &Expr, env: &Env, fv_map: &[String], fv_bind: &[Atom]) -> Atom {
-        match e {
-            Expr::Symbol(s) if s.starts_with('$') => {
-                if let Some(val) = lookup(env, s) {
-                    val
-                } else if let Some(pos) = fv_map.iter().position(|x| x == s) {
-                    match fv_bind.get(pos) {
-                        Some(Atom::Sym(fresh_s)) => {
-                            lookup(env, fresh_s).unwrap_or_else(|| Atom::sym(fresh_s))
-                        }
-                        Some(other) => other.clone(),
-                        None => Atom::sym(s),
-                    }
-                } else {
-                    Atom::sym(s)
-                }
-            }
-            Expr::Symbol(s) => Atom::sym(s),
-            Expr::Str(s) => Atom::str_val(s),
-            Expr::Number(n) => Atom::Num(n.clone()),
-            Expr::List(items) => {
-                let collected: Vec<Atom> = items
-                    .iter()
-                    .map(|it| rec(it, env, fv_map, fv_bind))
-                    .collect();
-                Atom::expr(collected)
-            }
-        }
-    }
-
-    match goal {
-        Expr::List(items) if !items.is_empty() => {
-            let head = match &items[0] {
-                Expr::Symbol(s) => s.clone(),
-                Expr::Str(s) => s.clone(),
-                other => other.to_string(),
-            };
-            let args: Vec<Atom> = items[1..]
-                .iter()
-                .map(|arg| rec(arg, base_env, free_vars_map, free_vars_bindings))
-                .collect();
-            if args.is_empty() {
-                Atom::sym(&head)
-            } else {
-                let mut list = vec![Atom::sym(&head)];
-                list.extend(args);
-                Atom::expr(list)
-            }
-        }
-        // A bare (non-list) goal is textualised, matching the original bridge.
-        _ => Atom::sym(&rec(goal, base_env, free_vars_map, free_vars_bindings).to_sexpr_string()),
-    }
 }
 
 /// Flatten the MeTTa environment plus fresh free-variable bindings into the

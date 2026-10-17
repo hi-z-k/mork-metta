@@ -171,8 +171,11 @@ pub enum Opcode {
         path: String,
     },
     /// Executes a Prolog goal via translatePredicate, marshaling variables in/out of the environment.
+    /// The goal head is a literal Prolog predicate name; its `nargs` arguments are evaluated
+    /// MeTTa expressions and have already been pushed onto the stack, in order.
     TranslatePredicate {
-        goal: Expr,
+        head: Expr,
+        nargs: u8,
         free_vars_map: Arc<[String]>,
     },
     /// Evaluates a `(py-call expr)` — raw expression tree, not evaluated args.

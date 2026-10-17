@@ -881,8 +881,20 @@ impl VMCompiler {
                                     self.free_vars.push(v.clone());
                                 }
                             }
+                            // The head is a literal Prolog predicate; arguments are
+                            // MeTTa expressions evaluated before marshalling.
+                            let (head, nargs) = match &items[1] {
+                                Expr::List(goal_items) if !goal_items.is_empty() => {
+                                    for arg in &goal_items[1..] {
+                                        self.compile(arg, code, false)?;
+                                    }
+                                    (goal_items[0].clone(), (goal_items.len() - 1) as u8)
+                                }
+                                other => (other.clone(), 0),
+                            };
                             code.push(Opcode::TranslatePredicate {
-                                goal: items[1].clone(),
+                                head,
+                                nargs,
                                 free_vars_map: std::sync::Arc::from(self.free_vars.clone()),
                             });
                             return Ok(());

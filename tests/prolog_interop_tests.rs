@@ -241,6 +241,28 @@ mod interop_tests {
     }
 
     // -------------------------------------------------------------
+    // Test 6b: translatePredicate evaluates MeTTa sub-expressions
+    // -------------------------------------------------------------
+    #[test]
+    fn interop_translate_predicate_evaluates_arguments() {
+        let _guard = INTEROP_LOCK.lock().unwrap();
+        if !ensure_prolog() { return; }
+        let mut rt = Runtime::new();
+
+        // `(car-atom (foo bar))` is a MeTTa call: it must reduce to `foo`
+        // before the goal is marshalled to Prolog.
+        let code = r#"
+        !(progn (translatePredicate (atom_string (car-atom (foo bar)) $s)) $s)
+        "#;
+        let res = rt.eval_str(code).unwrap();
+        let out = res.map(|a| a.to_sexpr_string()).unwrap_or_default();
+        assert!(
+            out.contains("foo"),
+            "MeTTa argument inside translatePredicate should be evaluated, got {out}"
+        );
+    }
+
+    // -------------------------------------------------------------
     // Test 7: Exception propagation (throw, undefined predicate)
     // -------------------------------------------------------------
     #[test]

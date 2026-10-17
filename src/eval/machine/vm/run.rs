@@ -2271,33 +2271,59 @@ fn run_vm_inner(
                     }
                 }
                 Opcode::TranslatePredicate {
-                    goal,
+                    head,
+                    nargs,
                     free_vars_map: _,
                 } => {
                     #[cfg(feature = "prolog-bridge")]
                     {
-                        let goal_atom_raw = crate::parser::expr_to_atom(&goal);
-                        if goal_atom_raw.to_sexpr_string().contains("&self") {
-                            static LAST_SYNCED_STAMP: std::sync::atomic::AtomicU64 =
-                                std::sync::atomic::AtomicU64::new(u64::MAX);
-                            let current_stamp =
-                                funcs.memo_stamp.load(std::sync::atomic::Ordering::Relaxed);
-                            if LAST_SYNCED_STAMP
-                                .swap(current_stamp, std::sync::atomic::Ordering::Relaxed)
-                                != current_stamp
-                            {
-                                let space_atoms = funcs.space.read().unwrap().get_atoms();
-                                let _ = crate::eval::prolog::vm::sync_space(&space_atoms);
-                            }
-                        }
+                        let head_atom = crate::parser::expr_to_atom(head);
 
-                        let rs = crate::eval::prolog::vm::eval_translate_predicate(
-                            &goal,
-                            &base_env,
-                            &state.free_vars_map,
-                            &state.free_vars_bindings,
-                        )?;
-                        state.stack.push(rs);
+                        // Pop the evaluated arguments pushed by the compiler, in order.
+                        let mut arg_sets: Vec<ResultSet> = Vec::with_capacity(*nargs as usize);
+                        for _ in 0..*nargs {
+                            arg_sets.push(
+                                state
+                                    .stack
+                                    .pop()
+                                    .ok_or("VM stack underflow on TranslatePredicate arg")?,
+                            );
+                        }
+                        arg_sets.reverse();
+
+                        let mut results: ResultSet = Vec::new();
+                        for (combo, combo_env) in
+                            super::super::budget::threaded_combinations(&arg_sets)
+                        {
+                            let mut goal_items = vec![head_atom.clone()];
+                            for arg in &combo {
+                                goal_items.push(subst_atom(arg, &combo_env));
+                            }
+                            let goal_atom = Atom::Expr(expr_data(goal_items));
+
+                            if goal_atom.to_sexpr_string().contains("&self") {
+                                static LAST_SYNCED_STAMP: std::sync::atomic::AtomicU64 =
+                                    std::sync::atomic::AtomicU64::new(u64::MAX);
+                                let current_stamp =
+                                    funcs.memo_stamp.load(std::sync::atomic::Ordering::Relaxed);
+                                if LAST_SYNCED_STAMP
+                                    .swap(current_stamp, std::sync::atomic::Ordering::Relaxed)
+                                    != current_stamp
+                                {
+                                    let space_atoms = funcs.space.read().unwrap().get_atoms();
+                                    let _ = crate::eval::prolog::vm::sync_space(&space_atoms);
+                                }
+                            }
+
+                            let rs = crate::eval::prolog::vm::eval_translate_predicate_atom(
+                                &goal_atom,
+                                &base_env,
+                                &state.free_vars_map,
+                                &state.free_vars_bindings,
+                            )?;
+                            results.extend(rs);
+                        }
+                        state.stack.push(results);
                         state.ip += 1;
                     }
                     #[cfg(not(feature = "prolog-bridge"))]
