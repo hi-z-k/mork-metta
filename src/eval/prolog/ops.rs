@@ -14,19 +14,12 @@ use crate::eval::prolog::ffi::{
     Api, CVT_WRITE, PL_Q_CATCH_EXCEPTION, PL_Q_EXT_STATUS, PL_Q_NODEBUG, PL_Q_NORMAL,
     PL_S_EXCEPTION, PL_S_LAST, PL_S_TRUE, qid_t, term_t,
 };
-use crate::eval::prolog::stream::PrologStream;
 
 pub enum FunctionOutcome {
     Single(Atom),
-    Stream(PrologStream),
+    Stream(std::vec::IntoIter<Atom>),
     Empty,
     Exception(String),
-}
-
-pub enum StepStreamResult {
-    Answer(Atom, bool),
-    Done,
-    Error(PrologError),
 }
 
 enum StepStatus {
@@ -276,15 +269,11 @@ pub fn call_function(functor_name: &str, args: &[Atom]) -> Result<FunctionOutcom
                 FunctionOutcome::Single(atom)
             }
             StepStatus::True => {
-                let atom = term_to_atom(result_term, api, &mut HashMap::new())?;
-                api.set_engine(old, std::ptr::null_mut());
-                return Ok(FunctionOutcome::Stream(PrologStream::new(
-                    pooled,
-                    qid,
-                    frame,
-                    result_term,
-                    Some(atom),
-                )));
+                let first = term_to_atom(result_term, api, &mut HashMap::new())?;
+                let atoms = collect_rest(api, qid, result_term, first);
+                api.close_query(qid);
+                api.discard_foreign_frame(frame);
+                FunctionOutcome::Stream(atoms.into_iter())
             }
             StepStatus::False => {
                 api.close_query(qid);
@@ -303,20 +292,33 @@ pub fn call_function(functor_name: &str, args: &[Atom]) -> Result<FunctionOutcom
     Ok(outcome)
 }
 
-/// Step an open query, converting the result term on success.
-pub fn step_query(api: &Api, qid: qid_t, result: term_t) -> StepStreamResult {
-    match next_solution(api, qid) {
-        StepStatus::True => match term_to_atom(result, api, &mut HashMap::new()) {
-            Ok(atom) => StepStreamResult::Answer(atom, false),
-            Err(e) => StepStreamResult::Error(e),
-        },
-        StepStatus::Last => match term_to_atom(result, api, &mut HashMap::new()) {
-            Ok(atom) => StepStreamResult::Answer(atom, true),
-            Err(e) => StepStreamResult::Error(e),
-        },
-        StepStatus::False => StepStreamResult::Done,
-        StepStatus::Exception(msg) => StepStreamResult::Error(PrologError::Exception(msg)),
+/// Eagerly drain the remaining solutions of a query that already produced
+/// `first`, mapping mid-stream failures to `(Error prolog_stream "...")` atoms.
+fn collect_rest(api: &Api, qid: qid_t, result: term_t, first: Atom) -> Vec<Atom> {
+    let mut out = vec![first];
+    loop {
+        match next_solution(api, qid) {
+            StepStatus::True => match term_to_atom(result, api, &mut HashMap::new()) {
+                Ok(atom) => out.push(atom),
+                Err(e) => {
+                    out.push(e.to_error_atom(&Atom::sym("prolog_stream")));
+                    break;
+                }
+            },
+            StepStatus::Last => {
+                if let Ok(atom) = term_to_atom(result, api, &mut HashMap::new()) {
+                    out.push(atom);
+                }
+                break;
+            }
+            StepStatus::False => break,
+            StepStatus::Exception(msg) => {
+                out.push(PrologError::Exception(msg).to_error_atom(&Atom::sym("prolog_stream")));
+                break;
+            }
+        }
     }
+    out
 }
 
 /// Assert a clause at the back (`assertz/1`) on the main engine.

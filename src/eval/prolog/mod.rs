@@ -10,5 +10,4 @@ pub mod error;
 pub mod ffi;
 pub mod handle;
 pub mod ops;
-pub mod stream;
 pub mod vm;
