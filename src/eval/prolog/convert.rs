@@ -31,7 +31,7 @@ pub fn atom_to_term(
     var_map: &mut VarMap,
 ) -> Result<term_t, PrologError> {
     let atom = strip_quote_atom(atom);
-    let term = unsafe { (api.new_term_ref)() };
+    let term = unsafe { api.new_term_ref() };
 
     match atom {
         Atom::Sym(s) => {
@@ -40,27 +40,27 @@ pub fn atom_to_term(
                 if let Some(&existing) = var_map.get(name) {
                     return Ok(existing);
                 } else {
-                    unsafe { (api.put_variable)(term) };
+                    unsafe { api.put_variable(term) };
                     var_map.insert(name.to_string(), term);
                     return Ok(term);
                 }
             } else {
                 let c_name = CString::new(name).map_err(|e| PrologError::Conversion(e.to_string()))?;
-                let atom_handle = unsafe { (api.new_atom)(c_name.as_ptr()) };
-                unsafe { (api.put_atom)(term, atom_handle) };
+                let atom_handle = unsafe { api.new_atom(c_name.as_ptr()) };
+                unsafe { api.put_atom(term, atom_handle) };
             }
         }
         Atom::Str(s) => {
             let c_s = CString::new(s.as_ref()).map_err(|e| PrologError::Conversion(e.to_string()))?;
-            unsafe { (api.put_string_chars)(term, c_s.as_ptr()) };
+            unsafe { api.put_string_chars(term, c_s.as_ptr()) };
         }
         Atom::Num(n) => match n {
             Numeric::Int(i) => {
                 if let Ok(v) = i64::try_from(i) {
-                    unsafe { (api.put_int64)(term, v) };
+                    unsafe { api.put_int64(term, v) };
                 } else {
                     let c_s = CString::new(i.to_string()).map_err(|e| PrologError::Conversion(e.to_string()))?;
-                    let rc = unsafe { (api.chars_to_term)(c_s.as_ptr(), term) };
+                    let rc = unsafe { api.chars_to_term(c_s.as_ptr(), term) };
                     if rc == 0 {
                         return Err(PrologError::Conversion("failed to parse big int into Prolog".into()));
                     }
@@ -69,7 +69,7 @@ pub fn atom_to_term(
             Numeric::Dec(d) => {
                 let approx = d.to_f64();
                 let f = approx.value();
-                unsafe { (api.put_float)(term, f) };
+                unsafe { api.put_float(term, f) };
             }
         },
         Atom::Expr(expr_data) => {
@@ -89,7 +89,7 @@ pub fn atom_to_term(
         }
         Atom::Gnd(g) => {
             if let Some(pf) = g.as_any().downcast_ref::<PrologForeign>() {
-                let rc = unsafe { (api.recorded)(pf.record, term) };
+                let rc = unsafe { api.recorded(pf.record, term) };
                 if rc == 0 {
                     return Err(PrologError::Conversion("failed to replay recorded term".into()));
                 }
@@ -186,23 +186,23 @@ fn compound_from_terms(
     arg_terms: &[term_t],
 ) -> Result<term_t, PrologError> {
     let c_head = CString::new(head).map_err(|e| PrologError::Conversion(e.to_string()))?;
-    let head_atom = unsafe { (api.new_atom)(c_head.as_ptr()) };
-    let term = unsafe { (api.new_term_ref)() };
+    let head_atom = unsafe { api.new_atom(c_head.as_ptr()) };
+    let term = unsafe { api.new_term_ref() };
 
     if arg_terms.is_empty() {
-        unsafe { (api.put_atom)(term, head_atom) };
+        unsafe { api.put_atom(term, head_atom) };
         return Ok(term);
     }
 
     let arity = arg_terms.len();
-    let functor = unsafe { (api.new_functor_sz)(head_atom, arity) };
+    let functor = unsafe { api.new_functor_sz(head_atom, arity) };
 
-    let a0 = unsafe { (api.new_term_refs)(arity as std::ffi::c_int) };
+    let a0 = unsafe { api.new_term_refs(arity as std::ffi::c_int) };
     for (i, &arg_term) in arg_terms.iter().enumerate() {
-        unsafe { (api.put_term)(a0 + i, arg_term) };
+        unsafe { api.put_term(a0 + i, arg_term) };
     }
 
-    let rc = unsafe { (api.cons_functor_v)(term, functor, a0) };
+    let rc = unsafe { api.cons_functor_v(term, functor, a0) };
     if rc == 0 {
         return Err(PrologError::Conversion("failed to build compound term".into()));
     }
@@ -218,24 +218,24 @@ fn compound_to_term(
     var_map: &mut VarMap,
 ) -> Result<term_t, PrologError> {
     let c_head = CString::new(head).map_err(|e| PrologError::Conversion(e.to_string()))?;
-    let head_atom = unsafe { (api.new_atom)(c_head.as_ptr()) };
-    let term = unsafe { (api.new_term_ref)() };
+    let head_atom = unsafe { api.new_atom(c_head.as_ptr()) };
+    let term = unsafe { api.new_term_ref() };
 
     if args.is_empty() {
-        unsafe { (api.put_atom)(term, head_atom) };
+        unsafe { api.put_atom(term, head_atom) };
         return Ok(term);
     }
 
     let arity = args.len();
-    let functor = unsafe { (api.new_functor_sz)(head_atom, arity) };
+    let functor = unsafe { api.new_functor_sz(head_atom, arity) };
 
-    let a0 = unsafe { (api.new_term_refs)(arity as std::ffi::c_int) };
+    let a0 = unsafe { api.new_term_refs(arity as std::ffi::c_int) };
     for (i, arg) in args.iter().enumerate() {
         let arg_term = atom_to_term(arg, api, var_map)?;
-        unsafe { (api.put_term)(a0 + i, arg_term) };
+        unsafe { api.put_term(a0 + i, arg_term) };
     }
 
-    let rc = unsafe { (api.cons_functor_v)(term, functor, a0) };
+    let rc = unsafe { api.cons_functor_v(term, functor, a0) };
     if rc == 0 {
         return Err(PrologError::Conversion("failed to build compound term".into()));
     }
@@ -249,8 +249,8 @@ fn list_to_term(
     items: &[Atom],
     var_map: &mut VarMap,
 ) -> Result<term_t, PrologError> {
-    let list_term = unsafe { (api.new_term_ref)() };
-    unsafe { (api.put_nil)(list_term) };
+    let list_term = unsafe { api.new_term_ref() };
+    unsafe { api.put_nil(list_term) };
 
     if items.is_empty() {
         return Ok(list_term);
@@ -259,8 +259,8 @@ fn list_to_term(
     let mut current = list_term;
     for item in items.iter().rev() {
         let head_term = atom_to_term(item, api, var_map)?;
-        let new_cell = unsafe { (api.new_term_ref)() };
-        let rc = unsafe { (api.cons_list)(new_cell, head_term, current) };
+        let new_cell = unsafe { api.new_term_ref() };
+        let rc = unsafe { api.cons_list(new_cell, head_term, current) };
         if rc == 0 {
             return Err(PrologError::Conversion("failed to build list".into()));
         }
@@ -275,7 +275,7 @@ pub fn term_to_atom(
     api: &Api,
     reverse_vars: &mut HashMap<usize, String>,
 ) -> Result<Atom, PrologError> {
-    let ttype = unsafe { (api.term_type)(term) };
+    let ttype = unsafe { api.term_type(term) };
     match ttype {
         crate::eval::prolog::ffi::PL_VARIABLE => {
             if let Some(name) = reverse_vars.get(&term) {
@@ -288,7 +288,7 @@ pub fn term_to_atom(
         }
         crate::eval::prolog::ffi::PL_ATOM => {
             let mut ptr: *const std::ffi::c_char = std::ptr::null();
-            let rc = unsafe { (api.get_chars)(term, &mut ptr, crate::eval::prolog::ffi::CVT_ATOM) };
+            let rc = unsafe { api.get_chars(term, &mut ptr, crate::eval::prolog::ffi::CVT_ATOM) };
             if rc == 0 || ptr.is_null() {
                 return Err(PrologError::Conversion("failed to get atom chars".into()));
             }
@@ -302,7 +302,7 @@ pub fn term_to_atom(
         }
         crate::eval::prolog::ffi::PL_STRING => {
             let mut ptr: *const std::ffi::c_char = std::ptr::null();
-            let rc = unsafe { (api.get_chars)(term, &mut ptr, crate::eval::prolog::ffi::CVT_STRING) };
+            let rc = unsafe { api.get_chars(term, &mut ptr, crate::eval::prolog::ffi::CVT_STRING) };
             if rc == 0 || ptr.is_null() {
                 return Err(PrologError::Conversion("failed to get string chars".into()));
             }
@@ -312,11 +312,11 @@ pub fn term_to_atom(
         }
         crate::eval::prolog::ffi::PL_INTEGER => {
             let mut val: i64 = 0;
-            if unsafe { (api.get_int64)(term, &mut val) } != 0 {
+            if unsafe { api.get_int64(term, &mut val) } != 0 {
                 Ok(Atom::num(val as i128))
             } else {
                 let mut ptr: *const std::ffi::c_char = std::ptr::null();
-                let rc = unsafe { (api.get_chars)(term, &mut ptr, crate::eval::prolog::ffi::CVT_INTEGER) };
+                let rc = unsafe { api.get_chars(term, &mut ptr, crate::eval::prolog::ffi::CVT_INTEGER) };
                 if rc != 0 && !ptr.is_null() {
                     let s = unsafe { std::ffi::CStr::from_ptr(ptr) }.to_str()
                         .map_err(|e| PrologError::Conversion(e.to_string()))?;
@@ -329,7 +329,7 @@ pub fn term_to_atom(
         }
         crate::eval::prolog::ffi::PL_FLOAT => {
             let mut val: f64 = 0.0;
-            let rc = unsafe { (api.get_float)(term, &mut val) };
+            let rc = unsafe { api.get_float(term, &mut val) };
             if rc == 0 {
                 return Err(PrologError::Conversion("failed to get float".into()));
             }
@@ -340,17 +340,17 @@ pub fn term_to_atom(
         }
         crate::eval::prolog::ffi::PL_LIST_PAIR => {
             let mut elements = Vec::new();
-            let head = unsafe { (api.new_term_ref)() };
-            let tail = unsafe { (api.new_term_ref)() };
+            let head = unsafe { api.new_term_ref() };
+            let tail = unsafe { api.new_term_ref() };
             let mut current = term;
-            while unsafe { (api.term_type)(current) } == crate::eval::prolog::ffi::PL_LIST_PAIR {
-                if unsafe { (api.get_list)(current, head, tail) } == 0 {
+            while unsafe { api.term_type(current) } == crate::eval::prolog::ffi::PL_LIST_PAIR {
+                if unsafe { api.get_list(current, head, tail) } == 0 {
                     break;
                 }
                 elements.push(term_to_atom(head, api, reverse_vars)?);
                 current = tail;
             }
-            if unsafe { (api.term_type)(current) } != crate::eval::prolog::ffi::PL_NIL {
+            if unsafe { api.term_type(current) } != crate::eval::prolog::ffi::PL_NIL {
                 // Improper list
                 elements.push(term_to_atom(current, api, reverse_vars)?);
             }
@@ -359,10 +359,10 @@ pub fn term_to_atom(
         crate::eval::prolog::ffi::PL_TERM => {
             let mut name_atom: crate::eval::prolog::ffi::atom_t = 0;
             let mut arity: std::ffi::c_int = 0;
-            if unsafe { (api.get_name_arity)(term, &mut name_atom, &mut arity) } == 0 {
+            if unsafe { api.get_name_arity(term, &mut name_atom, &mut arity) } == 0 {
                 return Err(PrologError::Conversion("failed to get functor name and arity".into()));
             }
-            let name_ptr = unsafe { (api.atom_chars)(name_atom) };
+            let name_ptr = unsafe { api.atom_chars(name_atom) };
             if name_ptr.is_null() {
                 return Err(PrologError::Conversion("failed to get functor name chars".into()));
             }
@@ -372,8 +372,8 @@ pub fn term_to_atom(
             let mut args = Vec::with_capacity(arity as usize + 1);
             args.push(Atom::sym(name_str));
             for i in 1..=arity {
-                let arg_term = unsafe { (api.new_term_ref)() };
-                if unsafe { (api.get_arg)(i, term, arg_term) } == 0 {
+                let arg_term = unsafe { api.new_term_ref() };
+                if unsafe { api.get_arg(i, term, arg_term) } == 0 {
                     return Err(PrologError::Conversion(format!("failed to get arg {i}")));
                 }
                 args.push(term_to_atom(arg_term, api, reverse_vars)?);
@@ -384,7 +384,7 @@ pub fn term_to_atom(
             ]))
         }
         _ => {
-            let record = unsafe { (api.record)(term) };
+            let record = unsafe { api.record(term) };
             if record == 0 {
                 return Err(PrologError::Conversion("failed to record foreign term".into()));
             }

@@ -137,25 +137,25 @@ mod tests {
         let manager = EngineManager::get().expect("EngineManager should be available");
         let pooled = manager.checkout().expect("checkout");
         let mut old_engine = 0;
-        unsafe { (api.set_engine)(pooled.engine(), &mut old_engine); }
-        let frame = unsafe { (api.open_foreign_frame)() };
+        unsafe { api.set_engine(pooled.engine(), &mut old_engine); }
+        let frame = unsafe { api.open_foreign_frame() };
 
         let mut var_map: VarMap = HashMap::new();
         
         // Test symbol
         let sym = Atom::sym("hello");
         let term = atom_to_term(&sym, &api, &mut var_map).expect("symbol conversion failed");
-        assert!(unsafe { (api.term_type)(term) } == 2); // PL_ATOM
+        assert!(unsafe { api.term_type(term) } == 2); // PL_ATOM
         
         // Test boolean
         let true_atom = Atom::sym("true");
         let term = atom_to_term(&true_atom, &api, &mut var_map).expect("true conversion failed");
-        assert!(unsafe { (api.term_type)(term) } == 2);
+        assert!(unsafe { api.term_type(term) } == 2);
         
         // Test variable
         let var = Atom::sym("$x");
         let term = atom_to_term(&var, &api, &mut var_map).expect("variable conversion failed");
-        assert!(unsafe { (api.term_type)(term) } == 1); // PL_VARIABLE
+        assert!(unsafe { api.term_type(term) } == 1); // PL_VARIABLE
         
         // Test same variable gets same term
         let term2 = atom_to_term(&var, &api, &mut var_map).expect("variable conversion failed");
@@ -164,12 +164,12 @@ mod tests {
         // Test integer
         let int = Atom::num(42);
         let term = atom_to_term(&int, &api, &mut var_map).expect("integer conversion failed");
-        assert!(unsafe { (api.term_type)(term) } == 3); // PL_INTEGER
+        assert!(unsafe { api.term_type(term) } == 3); // PL_INTEGER
         
         // Test string
         let str_atom = Atom::str_val("hello world");
         let term = atom_to_term(&str_atom, &api, &mut var_map).expect("string conversion failed");
-        assert!(unsafe { (api.term_type)(term) } == 6); // PL_STRING
+        assert!(unsafe { api.term_type(term) } == 6); // PL_STRING
         
         // Test list
         let list = Atom::expr(vec![
@@ -178,12 +178,12 @@ mod tests {
             Atom::num(3),
         ]);
         let term = atom_to_term(&list, &api, &mut var_map).expect("list conversion failed");
-        let t = unsafe { (api.term_type)(term) };
+        let t = unsafe { api.term_type(term) };
         assert!(t == 7 || t == 8 || t == 10); // PL_TERM, PL_NIL or PL_LIST_PAIR
 
         unsafe {
-            (api.discard_foreign_frame)(frame);
-            (api.set_engine)(old_engine, std::ptr::null_mut());
+            api.discard_foreign_frame(frame);
+            api.set_engine(old_engine, std::ptr::null_mut());
         }
     }
 
@@ -204,8 +204,8 @@ mod tests {
         let manager = EngineManager::get().expect("EngineManager should be available");
         let pooled = manager.checkout().expect("checkout");
         let mut old_engine = 0;
-        unsafe { (api.set_engine)(pooled.engine(), &mut old_engine); }
-        let frame = unsafe { (api.open_foreign_frame)() };
+        unsafe { api.set_engine(pooled.engine(), &mut old_engine); }
+        let frame = unsafe { api.open_foreign_frame() };
 
         let mut var_map: VarMap = HashMap::new();
         let mut rev_map: HashMap<usize, String> = HashMap::new();
@@ -244,8 +244,8 @@ mod tests {
         assert_eq!(back, compound);
 
         unsafe {
-            (api.discard_foreign_frame)(frame);
-            (api.set_engine)(old_engine, std::ptr::null_mut());
+            api.discard_foreign_frame(frame);
+            api.set_engine(old_engine, std::ptr::null_mut());
         }
     }
 

@@ -35,7 +35,7 @@ impl Query {
         args: term_t,
     ) -> Result<Self, PrologError> {
         let flags = PL_Q_CATCH_EXCEPTION | PL_Q_EXT_STATUS | PL_Q_NODEBUG;
-        let qid = unsafe { (api.open_query)(module, flags, predicate, args) };
+        let qid = unsafe { api.open_query(module, flags, predicate, args) };
         if qid == 0 {
             return Err(PrologError::Internal("PL_open_query returned NULL".into()));
         }
@@ -44,20 +44,20 @@ impl Query {
 
     /// Step to the next solution.
     pub fn step(&self, api: &Api) -> StepStatus {
-        let rc = unsafe { (api.next_solution)(self.qid) };
+        let rc = unsafe { api.next_solution(self.qid) };
         match rc {
             PL_S_LAST => StepStatus::Last,
             PL_S_TRUE => StepStatus::True,
             PL_S_FALSE => StepStatus::False,
             PL_S_EXCEPTION => {
-                let ex = unsafe { (api.exception)(self.qid) };
+                let ex = unsafe { api.exception(self.qid) };
                 let mut ptr: *const c_char = std::ptr::null();
-                let msg = if unsafe { (api.get_chars)(ex, &mut ptr, CVT_WRITE) } != 0 && !ptr.is_null() {
+                let msg = if unsafe { api.get_chars(ex, &mut ptr, CVT_WRITE) } != 0 && !ptr.is_null() {
                     unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned()
                 } else {
                     "unknown Prolog exception".to_string()
                 };
-                unsafe { (api.clear_exception)() };
+                unsafe { api.clear_exception() };
                 StepStatus::Exception(msg)
             }
             _ => StepStatus::False,
@@ -66,12 +66,12 @@ impl Query {
 
     /// Cut remaining choicepoints without closing the query.
     pub fn cut(&self, api: &Api) {
-        unsafe { (api.cut_query)(self.qid) };
+        unsafe { api.cut_query(self.qid) };
     }
 
     /// Close the query.
     pub fn close(self, api: &Api) {
-        unsafe { (api.close_query)(self.qid) };
+        unsafe { api.close_query(self.qid) };
     }
 
     /// Get raw query id.

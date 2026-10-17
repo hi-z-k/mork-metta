@@ -20,21 +20,21 @@ pub struct EngineManager {
 
 fn set_table_shared(api: &Api) {
     unsafe {
-        let frame = (api.open_foreign_frame)();
-        let p_set_flag = (api.predicate)(
+        let frame = api.open_foreign_frame();
+        let p_set_flag = api.predicate(
             b"set_prolog_flag\0".as_ptr() as *const _,
             2,
             b"system\0".as_ptr() as *const _,
         );
-        let targs = (api.new_term_refs)(2);
-        (api.put_atom_chars)(targs, b"table_shared\0".as_ptr() as *const _);
-        (api.put_atom_chars)(targs + 1, b"true\0".as_ptr() as *const _);
-        let q = (api.open_query)(0, crate::eval::prolog::ffi::PL_Q_NORMAL, p_set_flag, targs);
+        let targs = api.new_term_refs(2);
+        api.put_atom_chars(targs, b"table_shared\0".as_ptr() as *const _);
+        api.put_atom_chars(targs + 1, b"true\0".as_ptr() as *const _);
+        let q = api.open_query(0, crate::eval::prolog::ffi::PL_Q_NORMAL, p_set_flag, targs);
         if q != 0 {
-            (api.next_solution)(q);
-            (api.close_query)(q);
+            api.next_solution(q);
+            api.close_query(q);
         }
-        (api.discard_foreign_frame)(frame);
+        api.discard_foreign_frame(frame);
     }
 }
 
@@ -55,9 +55,9 @@ impl EngineManager {
 
         // Enable shared tabling on the main engine
         let mut old_engine = 0;
-        unsafe { (api.set_engine)(main_engine, &mut old_engine) };
+        unsafe { api.set_engine(main_engine, &mut old_engine) };
         set_table_shared(api);
-        unsafe { (api.set_engine)(old_engine, std::ptr::null_mut()) };
+        unsafe { api.set_engine(old_engine, std::ptr::null_mut()) };
 
         let manager = Arc::new(EngineManager {
             main_engine,
@@ -71,16 +71,16 @@ impl EngineManager {
     /// Create a new Prolog engine with shared tabling enabled.
     fn create_engine(&self) -> Result<PL_engine_t, PrologError> {
         let api = Api::get()?;
-        let engine = unsafe { (api.create_engine)(std::ptr::null_mut()) };
+        let engine = unsafe { api.create_engine(std::ptr::null_mut()) };
         if engine == 0 {
             return Err(PrologError::Internal("PL_create_engine returned NULL".into()));
         }
 
         // Enable shared tabling on the new engine
         let mut old_engine: PL_engine_t = 0;
-        unsafe { (api.set_engine)(engine, &mut old_engine) };
+        unsafe { api.set_engine(engine, &mut old_engine) };
         set_table_shared(api);
-        unsafe { (api.set_engine)(old_engine, std::ptr::null_mut()) };
+        unsafe { api.set_engine(old_engine, std::ptr::null_mut()) };
 
         Ok(engine)
     }
@@ -115,7 +115,7 @@ impl EngineManager {
         } else {
             // Pool is full, destroy the excess engine
             let api = Api::get().unwrap();
-            unsafe { (api.destroy_engine)(engine) };
+            unsafe { api.destroy_engine(engine) };
         }
     }
 

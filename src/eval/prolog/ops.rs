@@ -76,55 +76,55 @@ user:file_search_path(library, 'lib').
 pub fn load_prolog_code(api: &Api, manager: &Arc<EngineManager>, code: &str) -> Result<(), PrologError> {
     unsafe {
         let mut old_engine = 0;
-        (api.set_engine)(manager.main_engine(), &mut old_engine);
+        api.set_engine(manager.main_engine(), &mut old_engine);
 
-        let frame = (api.open_foreign_frame)();
-        let p_open_str = (api.predicate)(
+        let frame = api.open_foreign_frame();
+        let p_open_str = api.predicate(
             b"open_string\0".as_ptr() as *const _,
             2,
             b"system\0".as_ptr() as *const _,
         );
-        let sargs = (api.new_term_refs)(2);
+        let sargs = api.new_term_refs(2);
         let c_code = CString::new(code).map_err(|e| PrologError::Conversion(e.to_string()))?;
-        (api.put_string_chars)(sargs, c_code.as_ptr());
+        api.put_string_chars(sargs, c_code.as_ptr());
 
-        let q = (api.open_query)(0, PL_Q_NORMAL, p_open_str, sargs);
-        if q == 0 || (api.next_solution)(q) == 0 {
+        let q = api.open_query(0, PL_Q_NORMAL, p_open_str, sargs);
+        if q == 0 || api.next_solution(q) == 0 {
             if q != 0 {
-                (api.close_query)(q);
+                api.close_query(q);
             }
-            (api.discard_foreign_frame)(frame);
-            (api.set_engine)(old_engine, std::ptr::null_mut());
+            api.discard_foreign_frame(frame);
+            api.set_engine(old_engine, std::ptr::null_mut());
             return Err(PrologError::Internal("failed to open_string".into()));
         }
-        (api.cut_query)(q);
+        api.cut_query(q);
 
         let stream_term = sargs + 1;
-        let lf_args = (api.new_term_refs)(2);
-        (api.put_atom_chars)(lf_args, b"user\0".as_ptr() as *const _);
+        let lf_args = api.new_term_refs(2);
+        api.put_atom_chars(lf_args, b"user\0".as_ptr() as *const _);
 
-        let opt = (api.new_term_ref)();
-        let stream_atom = (api.new_atom)(b"stream\0".as_ptr() as *const _);
-        let stream_functor = (api.new_functor)(stream_atom, 1);
-        (api.cons_functor_v)(opt, stream_functor, stream_term);
+        let opt = api.new_term_ref();
+        let stream_atom = api.new_atom(b"stream\0".as_ptr() as *const _);
+        let stream_functor = api.new_functor(stream_atom, 1);
+        api.cons_functor_v(opt, stream_functor, stream_term);
 
-        let opts = (api.new_term_ref)();
-        (api.put_nil)(opts);
-        (api.cons_list)(opts, opt, opts);
-        (api.put_term)(lf_args + 1, opts);
+        let opts = api.new_term_ref();
+        api.put_nil(opts);
+        api.cons_list(opts, opt, opts);
+        api.put_term(lf_args + 1, opts);
 
-        let p_load = (api.predicate)(
+        let p_load = api.predicate(
             b"load_files\0".as_ptr() as *const _,
             2,
             b"system\0".as_ptr() as *const _,
         );
-        let q_load = (api.open_query)(0, PL_Q_NORMAL, p_load, lf_args);
+        let q_load = api.open_query(0, PL_Q_NORMAL, p_load, lf_args);
         if q_load != 0 {
-            (api.next_solution)(q_load);
-            (api.close_query)(q_load);
+            api.next_solution(q_load);
+            api.close_query(q_load);
         }
-        (api.discard_foreign_frame)(frame);
-        (api.set_engine)(old_engine, std::ptr::null_mut());
+        api.discard_foreign_frame(frame);
+        api.set_engine(old_engine, std::ptr::null_mut());
         Ok(())
     }
 }
@@ -138,20 +138,20 @@ pub fn call_predicate(
     let pooled = manager.checkout()?;
     unsafe {
         let mut old_engine = 0;
-        (api.set_engine)(pooled.engine(), &mut old_engine);
+        api.set_engine(pooled.engine(), &mut old_engine);
 
-        let frame = (api.open_foreign_frame)();
+        let frame = api.open_foreign_frame();
         let mut var_map = VarMap::new();
         let goal_term = match goal_to_term(goal, api, &mut var_map) {
             Ok(t) => t,
             Err(e) => {
-                (api.discard_foreign_frame)(frame);
-                (api.set_engine)(old_engine, std::ptr::null_mut());
+                api.discard_foreign_frame(frame);
+                api.set_engine(old_engine, std::ptr::null_mut());
                 return Err(e);
             }
         };
 
-        let p_call = (api.predicate)(
+        let p_call = api.predicate(
             b"call\0".as_ptr() as *const _,
             1,
             b"system\0".as_ptr() as *const _,
@@ -173,16 +173,16 @@ pub fn call_predicate(
                 }
                 StepStatus::Exception(msg) => {
                     query.close(api);
-                    (api.discard_foreign_frame)(frame);
-                    (api.set_engine)(old_engine, std::ptr::null_mut());
+                    api.discard_foreign_frame(frame);
+                    api.set_engine(old_engine, std::ptr::null_mut());
                     return Err(PrologError::Exception(msg));
                 }
             }
         }
 
         query.close(api);
-        (api.discard_foreign_frame)(frame);
-        (api.set_engine)(old_engine, std::ptr::null_mut());
+        api.discard_foreign_frame(frame);
+        api.set_engine(old_engine, std::ptr::null_mut());
         Ok(solutions)
     }
 }
@@ -199,32 +199,32 @@ pub fn call_function(
     let pooled = manager.checkout()?;
     unsafe {
         let mut old_engine = 0;
-        (api.set_engine)(pooled.engine(), &mut old_engine);
+        api.set_engine(pooled.engine(), &mut old_engine);
 
-        let frame = (api.open_foreign_frame)();
+        let frame = api.open_foreign_frame();
         let mut var_map = VarMap::new();
 
         let c_head = CString::new(functor_name).map_err(|e| PrologError::Conversion(e.to_string()))?;
-        let head_atom = (api.new_atom)(c_head.as_ptr());
+        let head_atom = api.new_atom(c_head.as_ptr());
         let arity = args.len() + 1;
-        let functor = (api.new_functor_sz)(head_atom, arity);
+        let functor = api.new_functor_sz(head_atom, arity);
 
-        let a0 = (api.new_term_refs)(arity as std::ffi::c_int);
+        let a0 = api.new_term_refs(arity as std::ffi::c_int);
         for (i, arg) in args.iter().enumerate() {
             let t = atom_to_term(arg, api, &mut var_map)?;
-            (api.put_term)(a0 + i, t);
+            api.put_term(a0 + i, t);
         }
         let result_term = a0 + args.len();
-        (api.put_variable)(result_term);
+        api.put_variable(result_term);
 
-        let goal_term = (api.new_term_ref)();
-        if (api.cons_functor_v)(goal_term, functor, a0) == 0 {
-            (api.discard_foreign_frame)(frame);
-            (api.set_engine)(old_engine, std::ptr::null_mut());
+        let goal_term = api.new_term_ref();
+        if api.cons_functor_v(goal_term, functor, a0) == 0 {
+            api.discard_foreign_frame(frame);
+            api.set_engine(old_engine, std::ptr::null_mut());
             return Err(PrologError::Conversion("failed to build function goal".into()));
         }
 
-        let p_call = (api.predicate)(
+        let p_call = api.predicate(
             b"call\0".as_ptr() as *const _,
             1,
             b"system\0".as_ptr() as *const _,
@@ -236,8 +236,8 @@ pub fn call_function(
                 let mut rev_map = HashMap::new();
                 let ans = term_to_atom(result_term, api, &mut rev_map)?;
                 query.close(api);
-                (api.discard_foreign_frame)(frame);
-                (api.set_engine)(old_engine, std::ptr::null_mut());
+                api.discard_foreign_frame(frame);
+                api.set_engine(old_engine, std::ptr::null_mut());
                 Ok(FunctionOutcome::Single(ans))
             }
             StepStatus::True => {
@@ -254,7 +254,7 @@ pub fn call_function(
                         result_term,
                     },
                 );
-                (api.set_engine)(old_engine, std::ptr::null_mut());
+                api.set_engine(old_engine, std::ptr::null_mut());
                 Ok(FunctionOutcome::Stream {
                     stream_id,
                     first_answer: Some(ans),
@@ -262,14 +262,14 @@ pub fn call_function(
             }
             StepStatus::False => {
                 query.close(api);
-                (api.discard_foreign_frame)(frame);
-                (api.set_engine)(old_engine, std::ptr::null_mut());
+                api.discard_foreign_frame(frame);
+                api.set_engine(old_engine, std::ptr::null_mut());
                 Ok(FunctionOutcome::Empty)
             }
             StepStatus::Exception(msg) => {
                 query.close(api);
-                (api.discard_foreign_frame)(frame);
-                (api.set_engine)(old_engine, std::ptr::null_mut());
+                api.discard_foreign_frame(frame);
+                api.set_engine(old_engine, std::ptr::null_mut());
                 Ok(FunctionOutcome::Exception(msg))
             }
         }
@@ -280,7 +280,7 @@ pub fn call_function(
 pub fn step_stream(api: &Api, stream: &mut ActiveStream) -> StepStreamResult {
     unsafe {
         let mut old_engine = 0;
-        (api.set_engine)(stream.pooled_engine.engine(), &mut old_engine);
+        api.set_engine(stream.pooled_engine.engine(), &mut old_engine);
 
         let res = match stream.query.step(api) {
             StepStatus::True => {
@@ -301,7 +301,7 @@ pub fn step_stream(api: &Api, stream: &mut ActiveStream) -> StepStreamResult {
             StepStatus::Exception(msg) => StepStreamResult::Error(PrologError::Exception(msg)),
         };
 
-        (api.set_engine)(old_engine, std::ptr::null_mut());
+        api.set_engine(old_engine, std::ptr::null_mut());
         res
     }
 }
@@ -310,10 +310,10 @@ pub fn step_stream(api: &Api, stream: &mut ActiveStream) -> StepStreamResult {
 pub fn close_stream(api: &Api, stream: ActiveStream) {
     unsafe {
         let mut old_engine = 0;
-        (api.set_engine)(stream.pooled_engine.engine(), &mut old_engine);
+        api.set_engine(stream.pooled_engine.engine(), &mut old_engine);
         stream.query.close(api);
-        (api.discard_foreign_frame)(stream.frame);
-        (api.set_engine)(old_engine, std::ptr::null_mut());
+        api.discard_foreign_frame(stream.frame);
+        api.set_engine(old_engine, std::ptr::null_mut());
     }
 }
 
@@ -325,24 +325,24 @@ pub fn asserta(
 ) -> Result<(), PrologError> {
     unsafe {
         let mut old_engine = 0;
-        (api.set_engine)(manager.main_engine(), &mut old_engine);
+        api.set_engine(manager.main_engine(), &mut old_engine);
 
-        let frame = (api.open_foreign_frame)();
+        let frame = api.open_foreign_frame();
         let mut var_map = VarMap::new();
         let clause_term = goal_to_term(clause, api, &mut var_map)?;
 
-        let p_assert = (api.predicate)(
+        let p_assert = api.predicate(
             b"asserta\0".as_ptr() as *const _,
             1,
             b"system\0".as_ptr() as *const _,
         );
-        let q = (api.open_query)(0, PL_Q_NORMAL, p_assert, clause_term);
+        let q = api.open_query(0, PL_Q_NORMAL, p_assert, clause_term);
         if q != 0 {
-            (api.next_solution)(q);
-            (api.close_query)(q);
+            api.next_solution(q);
+            api.close_query(q);
         }
-        (api.discard_foreign_frame)(frame);
-        (api.set_engine)(old_engine, std::ptr::null_mut());
+        api.discard_foreign_frame(frame);
+        api.set_engine(old_engine, std::ptr::null_mut());
         Ok(())
     }
 }
@@ -355,24 +355,24 @@ pub fn assertz(
 ) -> Result<(), PrologError> {
     unsafe {
         let mut old_engine = 0;
-        (api.set_engine)(manager.main_engine(), &mut old_engine);
+        api.set_engine(manager.main_engine(), &mut old_engine);
 
-        let frame = (api.open_foreign_frame)();
+        let frame = api.open_foreign_frame();
         let mut var_map = VarMap::new();
         let clause_term = goal_to_term(clause, api, &mut var_map)?;
 
-        let p_assert = (api.predicate)(
+        let p_assert = api.predicate(
             b"assertz\0".as_ptr() as *const _,
             1,
             b"system\0".as_ptr() as *const _,
         );
-        let q = (api.open_query)(0, PL_Q_NORMAL, p_assert, clause_term);
+        let q = api.open_query(0, PL_Q_NORMAL, p_assert, clause_term);
         if q != 0 {
-            (api.next_solution)(q);
-            (api.close_query)(q);
+            api.next_solution(q);
+            api.close_query(q);
         }
-        (api.discard_foreign_frame)(frame);
-        (api.set_engine)(old_engine, std::ptr::null_mut());
+        api.discard_foreign_frame(frame);
+        api.set_engine(old_engine, std::ptr::null_mut());
         Ok(())
     }
 }
@@ -385,27 +385,27 @@ pub fn retract(
 ) -> Result<bool, PrologError> {
     unsafe {
         let mut old_engine = 0;
-        (api.set_engine)(manager.main_engine(), &mut old_engine);
+        api.set_engine(manager.main_engine(), &mut old_engine);
 
-        let frame = (api.open_foreign_frame)();
+        let frame = api.open_foreign_frame();
         let mut var_map = VarMap::new();
         let clause_term = goal_to_term(clause, api, &mut var_map)?;
 
-        let p_retract = (api.predicate)(
+        let p_retract = api.predicate(
             b"retract\0".as_ptr() as *const _,
             1,
             b"system\0".as_ptr() as *const _,
         );
-        let q = (api.open_query)(0, PL_Q_NORMAL, p_retract, clause_term);
+        let q = api.open_query(0, PL_Q_NORMAL, p_retract, clause_term);
         let removed = if q != 0 {
-            let rc = (api.next_solution)(q);
-            (api.close_query)(q);
+            let rc = api.next_solution(q);
+            api.close_query(q);
             rc != 0
         } else {
             false
         };
-        (api.discard_foreign_frame)(frame);
-        (api.set_engine)(old_engine, std::ptr::null_mut());
+        api.discard_foreign_frame(frame);
+        api.set_engine(old_engine, std::ptr::null_mut());
         Ok(removed)
     }
 }
@@ -418,42 +418,42 @@ pub fn consult(
 ) -> Result<(), PrologError> {
     unsafe {
         let mut old_engine = 0;
-        (api.set_engine)(manager.main_engine(), &mut old_engine);
+        api.set_engine(manager.main_engine(), &mut old_engine);
 
-        let frame = (api.open_foreign_frame)();
+        let frame = api.open_foreign_frame();
         let c_path = CString::new(path).map_err(|e| PrologError::Conversion(e.to_string()))?;
-        let path_term = (api.new_term_ref)();
-        (api.put_atom_chars)(path_term, c_path.as_ptr());
+        let path_term = api.new_term_ref();
+        api.put_atom_chars(path_term, c_path.as_ptr());
 
-        let p_consult = (api.predicate)(
+        let p_consult = api.predicate(
             b"consult\0".as_ptr() as *const _,
             1,
             b"system\0".as_ptr() as *const _,
         );
-        let q = (api.open_query)(0, PL_Q_CATCH_EXCEPTION | PL_Q_NORMAL, p_consult, path_term);
+        let q = api.open_query(0, PL_Q_CATCH_EXCEPTION | PL_Q_NORMAL, p_consult, path_term);
         if q == 0 {
-            (api.discard_foreign_frame)(frame);
-            (api.set_engine)(old_engine, std::ptr::null_mut());
+            api.discard_foreign_frame(frame);
+            api.set_engine(old_engine, std::ptr::null_mut());
             return Err(PrologError::Internal(format!("failed to open consult query for {path}")));
         }
-        let rc = (api.next_solution)(q);
+        let rc = api.next_solution(q);
         if rc == PL_S_EXCEPTION {
-            let ex = (api.exception)(q);
+            let ex = api.exception(q);
             let mut ptr: *const std::ffi::c_char = std::ptr::null();
-            let msg = if (api.get_chars)(ex, &mut ptr, crate::eval::prolog::ffi::CVT_WRITE) != 0 && !ptr.is_null() {
+            let msg = if api.get_chars(ex, &mut ptr, crate::eval::prolog::ffi::CVT_WRITE) != 0 && !ptr.is_null() {
                 std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned()
             } else {
                 "consult exception".to_string()
             };
-            (api.clear_exception)();
-            (api.close_query)(q);
-            (api.discard_foreign_frame)(frame);
-            (api.set_engine)(old_engine, std::ptr::null_mut());
+            api.clear_exception();
+            api.close_query(q);
+            api.discard_foreign_frame(frame);
+            api.set_engine(old_engine, std::ptr::null_mut());
             return Err(PrologError::Exception(msg));
         }
-        (api.close_query)(q);
-        (api.discard_foreign_frame)(frame);
-        (api.set_engine)(old_engine, std::ptr::null_mut());
+        api.close_query(q);
+        api.discard_foreign_frame(frame);
+        api.set_engine(old_engine, std::ptr::null_mut());
         if rc == 0 {
             return Err(PrologError::Internal(format!("consult failed for {path}")));
         }
@@ -470,45 +470,45 @@ pub fn current_arities(
     let pooled = manager.checkout()?;
     unsafe {
         let mut old_engine = 0;
-        (api.set_engine)(pooled.engine(), &mut old_engine);
+        api.set_engine(pooled.engine(), &mut old_engine);
 
-        let frame = (api.open_foreign_frame)();
+        let frame = api.open_foreign_frame();
         let c_name = CString::new(name).map_err(|e| PrologError::Conversion(e.to_string()))?;
-        let name_atom = (api.new_atom)(c_name.as_ptr());
+        let name_atom = api.new_atom(c_name.as_ptr());
 
         // Construct current_predicate(Name/Arity)
-        let slash_atom = (api.new_atom)(b"/\0".as_ptr() as *const _);
-        let slash_functor = (api.new_functor)(slash_atom, 2);
+        let slash_atom = api.new_atom(b"/\0".as_ptr() as *const _);
+        let slash_functor = api.new_functor(slash_atom, 2);
 
-        let slash_args = (api.new_term_refs)(2);
-        (api.put_atom)(slash_args, name_atom);
+        let slash_args = api.new_term_refs(2);
+        api.put_atom(slash_args, name_atom);
         let arity_term = slash_args + 1;
-        (api.put_variable)(arity_term);
+        api.put_variable(arity_term);
 
-        let spec_term = (api.new_term_ref)();
-        (api.cons_functor_v)(spec_term, slash_functor, slash_args);
+        let spec_term = api.new_term_ref();
+        api.cons_functor_v(spec_term, slash_functor, slash_args);
 
-        let p_curr = (api.predicate)(
+        let p_curr = api.predicate(
             b"current_predicate\0".as_ptr() as *const _,
             1,
             b"system\0".as_ptr() as *const _,
         );
-        let user_atom = (api.new_atom)(b"user\0".as_ptr() as *const _);
-        let user_mod = (api.new_module)(user_atom);
-        let q = (api.open_query)(user_mod, PL_Q_NORMAL, p_curr, spec_term);
+        let user_atom = api.new_atom(b"user\0".as_ptr() as *const _);
+        let user_mod = api.new_module(user_atom);
+        let q = api.open_query(user_mod, PL_Q_NORMAL, p_curr, spec_term);
 
         let mut arities = BTreeSet::new();
         if q != 0 {
-            while (api.next_solution)(q) != 0 {
+            while api.next_solution(q) != 0 {
                 let mut a: i64 = 0;
-                if (api.get_int64)(arity_term, &mut a) != 0 && a >= 0 {
+                if api.get_int64(arity_term, &mut a) != 0 && a >= 0 {
                     arities.insert(a as usize);
                 }
             }
-            (api.close_query)(q);
+            api.close_query(q);
         }
-        (api.discard_foreign_frame)(frame);
-        (api.set_engine)(old_engine, std::ptr::null_mut());
+        api.discard_foreign_frame(frame);
+        api.set_engine(old_engine, std::ptr::null_mut());
         Ok(arities.into_iter().collect())
     }
 }
@@ -523,9 +523,9 @@ pub fn translate(
     let pooled = manager.checkout()?;
     unsafe {
         let mut old_engine = 0;
-        (api.set_engine)(pooled.engine(), &mut old_engine);
+        api.set_engine(pooled.engine(), &mut old_engine);
 
-        let frame = (api.open_foreign_frame)();
+        let frame = api.open_foreign_frame();
         let mut var_map = VarMap::new();
 
         // 1. Populate input bindings
@@ -538,14 +538,14 @@ pub fn translate(
         let goal_term = match goal_to_term(goal, api, &mut var_map) {
             Ok(t) => t,
             Err(e) => {
-                (api.discard_foreign_frame)(frame);
-                (api.set_engine)(old_engine, std::ptr::null_mut());
+                api.discard_foreign_frame(frame);
+                api.set_engine(old_engine, std::ptr::null_mut());
                 return Err(e);
             }
         };
 
         // 3. Open query call(Goal)
-        let p_call = (api.predicate)(
+        let p_call = api.predicate(
             b"call\0".as_ptr() as *const _,
             1,
             b"system\0".as_ptr() as *const _,
@@ -581,16 +581,16 @@ pub fn translate(
                 }
                 StepStatus::Exception(msg) => {
                     query.close(api);
-                    (api.discard_foreign_frame)(frame);
-                    (api.set_engine)(old_engine, std::ptr::null_mut());
+                    api.discard_foreign_frame(frame);
+                    api.set_engine(old_engine, std::ptr::null_mut());
                     return Err(PrologError::Exception(msg));
                 }
             }
         }
 
         query.close(api);
-        (api.discard_foreign_frame)(frame);
-        (api.set_engine)(old_engine, std::ptr::null_mut());
+        api.discard_foreign_frame(frame);
+        api.set_engine(old_engine, std::ptr::null_mut());
         Ok(all_solutions)
     }
 }
@@ -603,49 +603,49 @@ pub fn sync_space(
 ) -> Result<(), PrologError> {
     unsafe {
         let mut old_engine = 0;
-        (api.set_engine)(manager.main_engine(), &mut old_engine);
+        api.set_engine(manager.main_engine(), &mut old_engine);
 
-        let frame = (api.open_foreign_frame)();
+        let frame = api.open_foreign_frame();
 
         // 1. Retract all arities of '&self' dynamically
         let c_code = CString::new(
             "forall(current_predicate('&self'/A), (functor(H, '&self', A), retractall(H)))."
         ).unwrap();
-        let term = (api.new_term_ref)();
-        (api.chars_to_term)(c_code.as_ptr(), term);
-        let user_atom = (api.new_atom)(b"user\0".as_ptr() as *const _);
-        let user_mod = (api.new_module)(user_atom);
-        (api.call)(term, user_mod);
+        let term = api.new_term_ref();
+        api.chars_to_term(c_code.as_ptr(), term);
+        let user_atom = api.new_atom(b"user\0".as_ptr() as *const _);
+        let user_mod = api.new_module(user_atom);
+        api.call(term, user_mod);
 
         // 2. Assert each atom as '&self'(args...)
         for atom in atoms {
             if let Atom::Expr(items) = atom {
                 if !items.is_empty() {
                     let mut var_map = VarMap::new();
-                    let a0 = (api.new_term_refs)(items.len() as std::ffi::c_int);
+                    let a0 = api.new_term_refs(items.len() as std::ffi::c_int);
                     let mut ok = true;
                     for (i, it) in items.iter().enumerate() {
                         if let Ok(t) = atom_to_term(it, api, &mut var_map) {
-                            (api.put_term)(a0 + i, t);
+                            api.put_term(a0 + i, t);
                         } else {
                             ok = false;
                             break;
                         }
                     }
                     if ok {
-                        let self_atom = (api.new_atom)(b"&self\0".as_ptr() as *const _);
-                        let self_functor = (api.new_functor_sz)(self_atom, items.len());
-                        let clause_term = (api.new_term_ref)();
-                        if (api.cons_functor_v)(clause_term, self_functor, a0) != 0 {
-                            let p_assertz = (api.predicate)(
+                        let self_atom = api.new_atom(b"&self\0".as_ptr() as *const _);
+                        let self_functor = api.new_functor_sz(self_atom, items.len());
+                        let clause_term = api.new_term_ref();
+                        if api.cons_functor_v(clause_term, self_functor, a0) != 0 {
+                            let p_assertz = api.predicate(
                                 b"assertz\0".as_ptr() as *const _,
                                 1,
                                 b"system\0".as_ptr() as *const _,
                             );
-                            let q = (api.open_query)(0, PL_Q_NORMAL, p_assertz, clause_term);
+                            let q = api.open_query(0, PL_Q_NORMAL, p_assertz, clause_term);
                             if q != 0 {
-                                (api.next_solution)(q);
-                                (api.close_query)(q);
+                                api.next_solution(q);
+                                api.close_query(q);
                             }
                         }
                     }
@@ -653,8 +653,8 @@ pub fn sync_space(
             }
         }
 
-        (api.discard_foreign_frame)(frame);
-        (api.set_engine)(old_engine, std::ptr::null_mut());
+        api.discard_foreign_frame(frame);
+        api.set_engine(old_engine, std::ptr::null_mut());
         Ok(())
     }
 }

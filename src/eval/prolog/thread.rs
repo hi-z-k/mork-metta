@@ -197,7 +197,7 @@ fn worker_loop(cmd_rx: mpsc::Receiver<(PrologCommand, Option<mpsc::Sender<Prolog
 
     // Attach mork-prolog worker thread to the main engine
     unsafe {
-        let rc = (api.set_engine)(crate::eval::prolog::ffi::PL_ENGINE_MAIN, std::ptr::null_mut());
+        let rc = api.set_engine(crate::eval::prolog::ffi::PL_ENGINE_MAIN, std::ptr::null_mut());
         if rc != crate::eval::prolog::ffi::PL_ENGINE_SET {
             eprintln!("Warning: could not attach mork-prolog worker thread to PL_ENGINE_MAIN, rc={rc}");
         }

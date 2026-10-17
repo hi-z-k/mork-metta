@@ -32,8 +32,8 @@ mod interop_tests {
         let manager = EngineManager::get().unwrap();
         let pooled = manager.checkout().unwrap();
         let mut old = 0;
-        unsafe { (api.set_engine)(pooled.engine(), &mut old); }
-        let frame = unsafe { (api.open_foreign_frame)() };
+        unsafe { api.set_engine(pooled.engine(), &mut old); }
+        let frame = unsafe { api.open_foreign_frame() };
 
         // Test i64::MAX
         let max_i64 = Atom::num(i64::MAX as i128);
@@ -73,8 +73,8 @@ mod interop_tests {
         }
 
         unsafe {
-            (api.discard_foreign_frame)(frame);
-            (api.set_engine)(old, std::ptr::null_mut());
+            api.discard_foreign_frame(frame);
+            api.set_engine(old, std::ptr::null_mut());
         }
     }
 
@@ -89,8 +89,8 @@ mod interop_tests {
         let manager = EngineManager::get().unwrap();
         let pooled = manager.checkout().unwrap();
         let mut old = 0;
-        unsafe { (api.set_engine)(pooled.engine(), &mut old); }
-        let frame = unsafe { (api.open_foreign_frame)() };
+        unsafe { api.set_engine(pooled.engine(), &mut old); }
+        let frame = unsafe { api.open_foreign_frame() };
 
         // Test unicode string with spaces and quotes
         let test_str = Atom::str_val("Hello, 世界! 🚀 \"quotes\" and \n newlines");
@@ -117,8 +117,8 @@ mod interop_tests {
         assert_eq!(back, complex_sym, "Complex symbol roundtrip failed");
 
         unsafe {
-            (api.discard_foreign_frame)(frame);
-            (api.set_engine)(old, std::ptr::null_mut());
+            api.discard_foreign_frame(frame);
+            api.set_engine(old, std::ptr::null_mut());
         }
     }
 
@@ -133,8 +133,8 @@ mod interop_tests {
         let manager = EngineManager::get().unwrap();
         let pooled = manager.checkout().unwrap();
         let mut old = 0;
-        unsafe { (api.set_engine)(pooled.engine(), &mut old); }
-        let frame = unsafe { (api.open_foreign_frame)() };
+        unsafe { api.set_engine(pooled.engine(), &mut old); }
+        let frame = unsafe { api.open_foreign_frame() };
 
         // Empty list ()
         let empty_list = Atom::expr(vec![]);
@@ -157,8 +157,8 @@ mod interop_tests {
         assert_eq!(back, nested, "Nested list roundtrip failed");
 
         unsafe {
-            (api.discard_foreign_frame)(frame);
-            (api.set_engine)(old, std::ptr::null_mut());
+            api.discard_foreign_frame(frame);
+            api.set_engine(old, std::ptr::null_mut());
         }
     }
 
