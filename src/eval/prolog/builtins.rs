@@ -20,22 +20,18 @@ pub fn register_prolog_builtins(funcs: &FnTable) {
     funcs.insert_native("callPredicate", 1, |args, _| {
         expect_n_args(args, 1, "callPredicate")?;
         let solutions = ops::call_predicate_goal(&args[0]).map_err(|e| e.to_string())?;
-        match solutions.len() {
-            0 => Ok(NDet::empty()),
-            1 => Ok(NDet::single(Atom::sym("True"))),
-            n => Ok(NDet::stream((0..n).map(|_| Atom::sym("True")))),
-        }
+        Ok(match solutions.len() {
+            0 => NDet::empty(),
+            1 => NDet::single(Atom::sym("True")),
+            n => NDet::stream((0..n).map(|_| Atom::sym("True"))),
+        })
     });
 
     // (succeedsPredicate G) -> True if at least one solution, else False.
     funcs.insert_native("succeedsPredicate", 1, |args, _| {
         expect_n_args(args, 1, "succeedsPredicate")?;
         let solutions = ops::call_predicate_goal(&args[0]).map_err(|e| e.to_string())?;
-        let answer = if solutions.is_empty() {
-            "False"
-        } else {
-            "True"
-        };
+        let answer = if solutions.is_empty() { "False" } else { "True" };
         Ok(NDet::single(Atom::sym(answer)))
     });
 
@@ -50,33 +46,20 @@ pub fn register_prolog_builtins(funcs: &FnTable) {
     funcs.insert_native("retractPredicate", 1, |args, _| {
         expect_n_args(args, 1, "retractPredicate")?;
         let removed = ops::retract_clause(&args[0]).map_err(|e| e.to_string())?;
-        Ok(NDet::single(Atom::sym(if removed {
-            "True"
-        } else {
-            "False"
-        })))
+        let answer = if removed { "True" } else { "False" };
+        Ok(NDet::single(Atom::sym(answer)))
     });
 
     // (import_prolog_function name) -> True
     funcs.insert_native("import_prolog_function", 1, |args, funcs_ref| {
         expect_n_args(args, 1, "import_prolog_function")?;
-        let name_str = match &args[0] {
-            Atom::Sym(s) => s.as_str().to_string(),
-            Atom::Str(s) => s.as_ref().to_string(),
-            other => {
-                return Err(format!(
-                    "import_prolog_function expects symbol or string, got {other:?}"
-                ));
-            }
-        };
-
+        let name_str = name_arg(&args[0], "import_prolog_function")?;
         // Remember this name for call-time dynamic resolution of future arities.
         funcs_ref
             .imported_prolog_funcs
             .write()
             .unwrap()
             .insert(name_str.clone());
-
         if let Ok(arities) = ops::current_arities(&name_str) {
             for arity in arities {
                 if arity >= 1 {
@@ -84,58 +67,47 @@ pub fn register_prolog_builtins(funcs: &FnTable) {
                 }
             }
         }
-
         Ok(NDet::single(Atom::sym("True")))
     });
 
     // (add-translator-rule! name) -> True
     funcs.insert_native("add-translator-rule!", 1, |args, funcs_ref| {
         expect_n_args(args, 1, "add-translator-rule!")?;
-        let rule_name = match &args[0] {
-            Atom::Sym(s) => s.as_str().to_string(),
-            Atom::Str(s) => s.as_ref().to_string(),
-            other => {
-                return Err(format!(
-                    "add-translator-rule! expects symbol or string, got {other:?}"
-                ));
-            }
-        };
-        funcs_ref
-            .translator_rules
-            .write()
-            .unwrap()
-            .insert(rule_name);
+        let rule_name = name_arg(&args[0], "add-translator-rule!")?;
+        funcs_ref.translator_rules.write().unwrap().insert(rule_name);
         funcs_ref.invalidate_caches();
         Ok(NDet::single(Atom::sym("True")))
     });
 }
 
+fn name_arg(atom: &Atom, what: &str) -> Result<String, String> {
+    match atom {
+        Atom::Sym(s) => Ok(s.as_str().to_string()),
+        Atom::Str(s) => Ok(s.as_ref().to_string()),
+        other => Err(format!("{what} expects symbol or string, got {other:?}")),
+    }
+}
+
 /// Register a native binding for an imported Prolog function `name/arity`.
 pub fn register_imported_prolog_function(funcs: &FnTable, functor: &str, arity: u8) {
     let functor_name = functor.to_string();
-    funcs.insert_native(
-        functor,
-        arity,
-        move |call_args, _| match ops::call_function(&functor_name, call_args)
-            .map_err(|e| e.to_string())?
-        {
+    funcs.insert_native(functor, arity, move |call_args, _| {
+        match ops::call_function(&functor_name, call_args).map_err(|e| e.to_string())? {
             ops::FunctionOutcome::Single(atom) => Ok(NDet::single(atom)),
             ops::FunctionOutcome::Stream(stream) => Ok(NDet::stream(stream)),
             ops::FunctionOutcome::Empty => Ok(NDet::empty()),
             ops::FunctionOutcome::Exception(msg) => Err(msg),
-        },
-    );
+        }
+    });
     funcs.invalidate_caches();
 }
 
 /// Dynamically resolve an imported Prolog function at call time if not
 /// registered yet.
 pub fn try_resolve_imported_prolog_function(funcs: &FnTable, name: &str, arity: u8) -> bool {
-    let is_imported = funcs.imported_prolog_funcs.read().unwrap().contains(name);
-    if !is_imported {
+    if !funcs.imported_prolog_funcs.read().unwrap().contains(name) {
         return false;
     }
-
     if let Ok(arities) = ops::current_arities(name) {
         if arities.contains(&(arity as usize + 1)) {
             register_imported_prolog_function(funcs, name, arity);

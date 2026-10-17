@@ -55,6 +55,25 @@ thread_local! {
     static VM_DEPTH: Cell<u32> = Cell::new(0);
 }
 
+fn resolve_import_file(
+    path: &str,
+    ext: &str,
+    import_dir: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    let direct = std::path::Path::new(path);
+    if direct.exists() {
+        return Some(direct.to_path_buf());
+    }
+    let with_ext = format!("{path}.{ext}");
+    [
+        std::path::PathBuf::from(&with_ext),
+        import_dir.join(path),
+        import_dir.join(&with_ext),
+    ]
+    .into_iter()
+    .find(|p| p.exists())
+}
+
 fn replace_at_path(atom: &mut Atom, path: &[usize], val: Atom) {
     if path.is_empty() {
         *atom = val;
@@ -2216,19 +2235,7 @@ fn run_vm_inner(
                     // reuse existing apply.rs Frame::PythonImport logic directly
                     let _space_rs = state.stack.pop(); // space-ref consumed but unused for Python
                     let import_dir = funcs.import_dir.lock().unwrap().clone();
-                    let py_path = std::path::Path::new(&path);
-                    let resolved = if py_path.exists() {
-                        Some(py_path.to_path_buf())
-                    } else {
-                        let with_ext = format!("{}.py", path);
-                        let candidates = [
-                            std::path::PathBuf::from(&with_ext),
-                            import_dir.join(&path),
-                            import_dir.join(&with_ext),
-                        ];
-                        candidates.into_iter().find(|p| p.exists())
-                    }
-                    .ok_or_else(|| {
+                    let resolved = resolve_import_file(&path, "py", &import_dir).ok_or_else(|| {
                         format!(
                             "import!: cannot find Python file '{}' (searched CWD and '{}')",
                             path,
@@ -2242,19 +2249,7 @@ fn run_vm_inner(
                 Opcode::PrologImport { path } => {
                     let _space_rs = state.stack.pop(); // space-ref consumed but unused
                     let import_dir = funcs.import_dir.lock().unwrap().clone();
-                    let pl_path = std::path::Path::new(&path);
-                    let _resolved = if pl_path.exists() {
-                        Some(pl_path.to_path_buf())
-                    } else {
-                        let with_ext = format!("{}.pl", path);
-                        let candidates = [
-                            std::path::PathBuf::from(&with_ext),
-                            import_dir.join(&path),
-                            import_dir.join(&with_ext),
-                        ];
-                        candidates.into_iter().find(|p| p.exists())
-                    }
-                    .ok_or_else(|| {
+                    let resolved = resolve_import_file(&path, "pl", &import_dir).ok_or_else(|| {
                         format!(
                             "import!: cannot find Prolog file '{}' (searched CWD and '{}')",
                             path,
@@ -2263,7 +2258,7 @@ fn run_vm_inner(
                     })?;
                     #[cfg(feature = "prolog-bridge")]
                     {
-                        crate::eval::prolog::vm::consult_file(&_resolved.to_string_lossy())?;
+                        crate::eval::prolog::vm::consult_file(&resolved.to_string_lossy())?;
                         state.stack.push(plain(vec![Atom::sym("true")]));
                         state.ip += 1;
                     }

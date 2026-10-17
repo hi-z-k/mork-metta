@@ -21,11 +21,9 @@ pub fn sync_space(atoms: &[Atom]) -> Result<(), String> {
 }
 
 /// Execute an already-evaluated `translatePredicate` goal and return one branch
-/// environment per Prolog solution.
-///
-/// Unbound variables were compiled to fresh `$__fresh_*` symbols and are
-/// forwarded in; solution bindings are mapped back onto both the original name
-/// and its fresh counterpart.
+/// environment per Prolog solution. Unbound variables compiled to fresh
+/// `$__fresh_*` symbols are forwarded in; solution bindings are mapped back
+/// onto both the original name and its fresh counterpart.
 pub fn eval_translate_predicate_atom(
     goal: &Atom,
     base_env: &Env,
@@ -33,7 +31,6 @@ pub fn eval_translate_predicate_atom(
     free_vars_bindings: &[Atom],
 ) -> Result<ResultSet, String> {
     let in_bindings = gather_bindings(base_env, free_vars_map, free_vars_bindings);
-
     let solutions = ops::translate_goal(goal, &in_bindings).map_err(|e| e.to_string())?;
     if solutions.is_empty() {
         return Ok(Vec::new());
@@ -43,21 +40,18 @@ pub fn eval_translate_predicate_atom(
     for solution in solutions {
         let mut env = base_env.clone();
         for (vname, vval) in solution {
-            let is_unbound_dummy = matches!(&vval, Atom::Sym(s) if s.starts_with("$_V"));
-            if is_unbound_dummy {
+            if matches!(&vval, Atom::Sym(s) if s.starts_with("$_V")) {
                 continue;
             }
             env = env.extend(&vname, vval.clone());
-            for (idx, orig_name) in free_vars_map.iter().enumerate() {
+            for (orig_name, fresh) in free_vars_map.iter().zip(free_vars_bindings) {
+                let Atom::Sym(fresh_s) = fresh else {
+                    continue;
+                };
                 if orig_name == &vname {
-                    if let Some(Atom::Sym(fresh_s)) = free_vars_bindings.get(idx) {
-                        env = env.extend(fresh_s, vval.clone());
-                    }
-                }
-                if let Some(Atom::Sym(fresh_s)) = free_vars_bindings.get(idx) {
-                    if fresh_s.as_str() == vname.as_str() {
-                        env = env.extend(orig_name, vval.clone());
-                    }
+                    env = env.extend(fresh_s, vval.clone());
+                } else if fresh_s.as_str() == vname {
+                    env = env.extend(orig_name, vval.clone());
                 }
             }
         }
@@ -80,13 +74,10 @@ fn gather_bindings(
     let mut todo = Vec::new();
     loop {
         match curr.inner() {
-            EnvNode::Empty => {
-                if let Some(next) = todo.pop() {
-                    curr = next;
-                    continue;
-                }
-                break;
-            }
+            EnvNode::Empty => match todo.pop() {
+                Some(next) => curr = next,
+                None => break,
+            },
             EnvNode::Cons { name, value, next } => {
                 if seen.insert(name.to_string()) {
                     bindings.push((name.to_string(), (**value).clone()));
@@ -101,15 +92,17 @@ fn gather_bindings(
     }
 
     for (idx, name) in free_vars_map.iter().enumerate() {
-        if let Some(Atom::Sym(fresh_s)) = free_vars_bindings.get(idx) {
-            if let Some(bound_val) = lookup(base_env, fresh_s) {
-                if seen.insert(name.clone()) {
-                    bindings.push((name.clone(), bound_val.clone()));
-                }
-                if seen.insert(fresh_s.to_string()) {
-                    bindings.push((fresh_s.to_string(), bound_val));
-                }
-            }
+        let Some(Atom::Sym(fresh_s)) = free_vars_bindings.get(idx) else {
+            continue;
+        };
+        let Some(bound_val) = lookup(base_env, fresh_s) else {
+            continue;
+        };
+        if seen.insert(name.clone()) {
+            bindings.push((name.clone(), bound_val.clone()));
+        }
+        if seen.insert(fresh_s.to_string()) {
+            bindings.push((fresh_s.to_string(), bound_val));
         }
     }
 
