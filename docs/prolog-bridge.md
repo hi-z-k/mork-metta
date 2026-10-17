@@ -34,8 +34,7 @@ MeTTa eval ──▶ EngineManager ──▶ PL_ENGINE_MAIN (mutex, setup/mutati
   checked out for query execution (imported Prolog functions, `callPredicate`,
   `translatePredicate`). A checked-out engine is attached to the calling thread
   for the duration of an operation and returned to the pool when the operation
-  finishes or the `PrologStream` is exhausted/dropped, so a lazily-consumed
-  stream does not block the main engine.
+  finishes (results are collected eagerly).
 - **Shared tabling**: every engine has `table_shared` enabled so tabled
   predicates observe one another's tables.
 
@@ -55,8 +54,8 @@ MeTTa eval ──▶ EngineManager ──▶ PL_ENGINE_MAIN (mutex, setup/mutati
 
 Outer `(quote ...)` is stripped before conversion. Terms that cannot be
 represented as MeTTa atoms (blobs, cyclic terms, dicts) are recorded with
-`PL_record` and surfaced as an opaque `PrologForeign` grounded value that keeps a
-`PL_recorded`/`PL_erase` lifecycle.
+`PL_record` and surfaced as an opaque `PrologForeign` grounded value, replayed
+into Prolog terms with `PL_recorded`.
 
 ## Queries and streaming
 
@@ -73,11 +72,11 @@ PL_Q_NORMAL | PL_Q_NODEBUG | PL_Q_CATCH_EXCEPTION | PL_Q_EXT_STATUS
 - `PL_S_FALSE`  — failure                          → `FunctionOutcome::Empty`
 - `PL_S_EXCEPTION` — error                         → `FunctionOutcome::Exception`
 
-An open query becomes a `PrologStream` (`stream.rs`) that owns the pooled
-engine, query id and foreign frame. The stream is `Send`: each `next()` attaches
-the owned engine to the calling thread for the step, then detaches it. Prolog
-exceptions are rendered with `PL_get_chars(..., CVT_WRITE)` (via
-`PL_exception(qid)`) and mapped to `(Error <context> "<message>")` atoms.
+All solutions are collected eagerly: `FunctionOutcome::Stream` is a fully
+drained `IntoIter<Atom>` produced by `collect_rest`, and mid-stream failures are
+rendered with `PL_get_chars(..., CVT_WRITE)` (via `PL_exception(qid)`) into
+`(Error prolog_stream "<message>")` atoms. This keeps the pooled engine attached
+only for the duration of one function call.
 
 ## `translatePredicate`
 
@@ -122,7 +121,6 @@ engine-manager initialization.
 | `handle.rs`    | `PrologForeign` opaque grounded handle                 |
 | `convert.rs`   | `atom_to_term` / `term_to_atom`                        |
 | `engine.rs`    | `EngineManager` (main engine + pool + tabling)        |
-| `stream.rs`    | `PrologStream` lazy solution iterator                  |
 | `ops.rs`       | query lifecycle, imports, consult/sync, prelude        |
 | `builtins.rs`  | native builtin registration                            |
 | `vm.rs`        | MeTTa-side hooks: consult, space sync, `translatePredicate` marshalling |
