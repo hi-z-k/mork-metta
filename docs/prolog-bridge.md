@@ -16,24 +16,26 @@ startup, so mork-metta never links against SWI at build time.
 
 ## Threading model
 
-All SWI C API calls happen on a single dedicated OS thread named `mork-prolog`.
-This avoids SWI-Prolog's per-engine thread affinity rules and keeps the foreign
-function contract simple. The VM communicates with it over a channel of
-commands and replies; the startup result (engine manager or error) is cached in
-a `OnceLock`.
+SWI-Prolog engines are attached to at most one OS thread at a time, so the
+bridge keeps a single engine manager (`engine.rs`) that owns a main engine and
+a pool of reusable worker engines. The startup result (engine manager or error)
+is cached in a `OnceLock`.
 
 ```
-MeTTa eval ──command──▶ mork-prolog thread ──▶ SWI engine(s)
-     ▲                        │
-     └────────reply───────────┘
+MeTTa eval ──▶ EngineManager ──▶ PL_ENGINE_MAIN (mutex, setup/mutations)
+                    │
+                    └──▶ engine pool (one engine per open query/stream)
 ```
 
-- **Main engine** (`PL_ENGINE_MAIN`): used for setup, `assert*`, `retract*`, and
-  consulting files. Mutations made here are visible to all engines.
+- **Main engine** (`PL_ENGINE_MAIN`): used for setup, `assert*`, `retract*`,
+  consulting files and space sync. Access is serialized behind a mutex
+  (`EngineManager::with_main`); mutations made here are visible to all engines.
 - **Engine pool**: up to 8 idle `PL_create_engine` engines are kept alive and
-  checked out for streaming queries, so a lazily-consumed `PrologStream` does not
-  block the main engine. Engines are returned to the pool when the stream is
-  dropped or exhausted.
+  checked out for query execution (imported Prolog functions, `callPredicate`,
+  `translatePredicate`). A checked-out engine is attached to the calling thread
+  for the duration of an operation and returned to the pool when the operation
+  finishes or the `PrologStream` is exhausted/dropped, so a lazily-consumed
+  stream does not block the main engine.
 - **Shared tabling**: every engine has `table_shared` enabled so tabled
   predicates observe one another's tables.
 
@@ -58,7 +60,7 @@ represented as MeTTa atoms (blobs, cyclic terms, dicts) are recorded with
 
 ## Queries and streaming
 
-`query.rs` opens goals with:
+`ops.rs` checks out a pooled engine and opens `call(Goal)` with:
 
 ```
 PL_Q_NORMAL | PL_Q_NODEBUG | PL_Q_CATCH_EXCEPTION | PL_Q_EXT_STATUS
@@ -66,14 +68,16 @@ PL_Q_NORMAL | PL_Q_NODEBUG | PL_Q_CATCH_EXCEPTION | PL_Q_EXT_STATUS
 
 `PL_next_solution` with extended status distinguishes:
 
-- `PL_S_LAST`   — success, no choicepoint remains → `Outcome::One`
-- `PL_S_TRUE`   — success, more solutions exist   → `Outcome::Open`
-- `PL_S_FALSE`  — failure                          → `Outcome::Failed`
-- `PL_S_EXCEPTION` — error                         → `Outcome::Exception`
+- `PL_S_LAST`   — success, no choicepoint remains → `FunctionOutcome::Single`
+- `PL_S_TRUE`   — success, more solutions exist   → `FunctionOutcome::Stream`
+- `PL_S_FALSE`  — failure                          → `FunctionOutcome::Empty`
+- `PL_S_EXCEPTION` — error                         → `FunctionOutcome::Exception`
 
-`Outcome::Open` becomes an `NDet::Stream` (`stream.rs`) that steps the query on
-demand. Prolog exceptions are rendered with `PL_get_chars(..., CVT_WRITE)` and
-mapped to `(Error <context> "<message>")` atoms.
+An open query becomes a `PrologStream` (`stream.rs`) that owns the pooled
+engine, query id and foreign frame. The stream is `Send`: each `next()` attaches
+the owned engine to the calling thread for the step, then detaches it. Prolog
+exceptions are rendered with `PL_get_chars(..., CVT_WRITE)` (via
+`PL_exception(qid)`) and mapped to `(Error <context> "<message>")` atoms.
 
 ## `translatePredicate`
 
@@ -103,24 +107,22 @@ form.
 
 ## Prolog prelude
 
-A small embedded prelude (`prelude.pl`) supplies MeTTa-specific Prolog
+A small embedded prelude (`ops::init_support`) supplies MeTTa-specific Prolog
 predicates that are not part of core SWI-Prolog, such as the three-argument
-arithmetic predicates (`'+'(A,B,R) :- R is A + B.`) and list helpers. It is
-consulted once at engine-manager initialization.
+arithmetic predicates (`'+'(A,B,R) :- R is A + B.`), `&self/N` dynamic
+declarations and `file_search_path` entries for `./lib`. It is loaded once at
+engine-manager initialization.
 
 ## Modules
 
 | File           | Responsibility                                        |
 | -------------- | ----------------------------------------------------- |
-| `ffi.rs`       | `libloading` wrapper + safe SWI C API bindings        |
+| `ffi.rs`       | `dlopen2` wrapper + safe SWI C API bindings           |
 | `error.rs`     | `PrologError` and exception → `(Error ...)` mapping   |
 | `handle.rs`    | `PrologForeign` opaque grounded handle                 |
 | `convert.rs`   | `atom_to_term` / `term_to_atom`                        |
 | `engine.rs`    | `EngineManager` (main engine + pool + tabling)        |
-| `query.rs`     | open/step/close query lifecycle                        |
-| `stream.rs`    | `PrologStream` lazy `NDet` iterator                    |
-| `thread.rs`    | `mork-prolog` worker thread + `PrologClient`           |
-| `ops.rs`       | command executors (call/next/close/direct/…)           |
+| `stream.rs`    | `PrologStream` lazy solution iterator                  |
+| `ops.rs`       | query lifecycle, imports, consult/sync, prelude        |
 | `builtins.rs`  | native builtin registration                            |
-| `translate.rs` | `translatePredicate` support (env copy-in/copy-out)    |
-| `prelude.pl`   | embedded MeTTa-specific Prolog support clauses         |
+| `vm.rs`        | MeTTa-side hooks: consult, space sync, `translatePredicate` marshalling |
