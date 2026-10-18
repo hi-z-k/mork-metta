@@ -46,17 +46,7 @@ fn open_call(api: &Api, goal: term_t) -> Result<qid_t, PrologError> {
     open_query(api, sys_pred(api, b"call\0", 1), goal, PL_Q_CATCH_EXCEPTION | PL_Q_EXT_STATUS | PL_Q_NODEBUG)
 }
 fn run_once(api: &Api, pred: predicate_t, args: term_t, flags: c_int) -> Result<c_int, PrologError> {
-    let q = open_query(api, pred, args, flags)?;
-    unsafe {
-        let rc = api.next_solution(q);
-        if rc == PL_S_EXCEPTION {
-            let msg = read_exception(api, q);
-            api.close_query(q);
-            return Err(PrologError::Exception(msg));
-        }
-        api.close_query(q);
-        Ok(rc)
-    }
+    Ok(unsafe { api.call_predicate(0, flags, pred, args) })
 }
 fn with_main_frame<R>(f: impl FnOnce(&Api) -> Result<R, PrologError>) -> Result<R, PrologError> {
     engine::manager()?.with_main(|api| { let frame = unsafe { api.open_foreign_frame() }; let result = f(api); unsafe { api.discard_foreign_frame(frame) }; result })?
@@ -86,23 +76,18 @@ pub fn load_prolog_code(manager: &Arc<EngineManager>, code: &str) -> Result<(), 
             let frame = api.open_foreign_frame();
             let (sargs, c_code) = (api.new_term_refs(2), CString::new(code)?);
             api.put_string_chars(sargs, c_code.as_ptr());
-            let q = open_query(api, sys_pred(api, b"open_string\0", 2), sargs, PL_Q_NORMAL)?;
-            if api.next_solution(q) == 0 {
-                api.close_query(q);
+            if api.call_predicate(0, PL_Q_NORMAL, sys_pred(api, b"open_string\0", 2), sargs) == 0 {
                 api.discard_foreign_frame(frame);
                 return Err(PrologError::Internal("failed to open_string".into()));
             }
-            api.cut_query(q);
             let lf_args = api.new_term_refs(2);
             api.put_atom_chars(lf_args, b"user\0".as_ptr() as *const _);
-            let opt = api.new_term_ref();
+            let (opt, opts) = (api.new_term_ref(), api.new_term_ref());
             api.cons_functor_v(opt, api.new_functor(api.new_atom(b"stream\0".as_ptr() as *const _), 1), sargs + 1);
-            let opts = api.new_term_ref();
             api.put_nil(opts);
             api.cons_list(opts, opt, opts);
             api.put_term(lf_args + 1, opts);
-            let q_load = open_query(api, sys_pred(api, b"load_files\0", 2), lf_args, PL_Q_NORMAL);
-            if let Ok(q) = q_load { api.next_solution(q); api.close_query(q); }
+            api.call_predicate(0, PL_Q_NORMAL, sys_pred(api, b"load_files\0", 2), lf_args);
             api.discard_foreign_frame(frame);
             Ok(())
         }

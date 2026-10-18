@@ -1,5 +1,4 @@
 use std::any::Any;
-use std::fmt;
 use std::hash::{Hash, Hasher};
 use crate::atom::Grounded;
 use crate::eval::prolog::ffi::record_t;
@@ -21,7 +20,4 @@ impl Grounded for PrologForeign {
         hasher.finish()
     }
     fn as_any(&self) -> &dyn Any { self }
-}
-impl fmt::Display for PrologForeign {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self.display_metta()) }
 }

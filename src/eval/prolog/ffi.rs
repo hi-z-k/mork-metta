@@ -39,7 +39,8 @@ swipl! {
     new_functor_sz = "PL_new_functor_sz"(a: atom_t, arity: usize) -> functor_t; new_atom = "PL_new_atom"(s: *const c_char) -> atom_t;
     atom_chars = "PL_atom_chars"(a: atom_t) -> *const c_char; predicate = "PL_predicate"(name: *const c_char, arity: c_int, module: *const c_char) -> predicate_t;
     new_module = "PL_new_module"(name: atom_t) -> module_t; open_query = "PL_open_query"(module: module_t, flags: c_int, pred: predicate_t, args: term_t) -> qid_t;
-    next_solution = "PL_next_solution"(qid: qid_t) -> c_int; cut_query = "PL_cut_query"(qid: qid_t) -> c_int;
+    call_predicate = "PL_call_predicate"(module: module_t, flags: c_int, pred: predicate_t, args: term_t) -> c_int;
+    next_solution = "PL_next_solution"(qid: qid_t) -> c_int;
     close_query = "PL_close_query"(qid: qid_t) -> c_int; record = "PL_record"(t: term_t) -> record_t;
     recorded = "PL_recorded"(r: record_t, t: term_t) -> c_int; exception = "PL_exception"(qid: qid_t) -> term_t;
     chars_to_term = "PL_chars_to_term"(s: *const c_char, t: term_t) -> c_int; call = "PL_call"(t: term_t, module: module_t) -> c_int;
@@ -89,32 +90,22 @@ impl Api {
             else { continue };
             if !output.status.success() { continue; }
             let stdout = String::from_utf8_lossy(&output.stdout);
-            let var = |key: &str| {
-                stdout.lines().find_map(|l| {
-                    l.trim()
-                        .strip_prefix(key)
-                        .map(|v| v.trim_matches(|c| c == '"' || c == ';' || c == '\'').trim().to_string())
-                })
-            };
+            let var = |key: &str| stdout.lines().find_map(|l| {
+                l.trim().strip_prefix(key).map(|v| v.trim_matches(|c| c == '"' || c == ';' || c == '\'').trim().to_string())
+            });
             if let Some(base) = var("PLBASE=") {
                 unsafe { std::env::set_var("SWI_HOME_DIR", &base); std::env::set_var("PLBASE", &base); }
             }
             if let Some(lib) = var("PLLIBSWIPL=") { return Ok(lib); }
             if let Some(dir) = var("PLLIBDIR=") {
                 let cands = Self::names().iter().map(|n| format!("{dir}/{n}"));
-                return Self::first_existing(cands).ok_or_else(|| {
-                    PrologError::LibraryNotFound(format!("could not locate libswipl in {dir}"))
-                });
+                return Self::first_existing(cands).ok_or_else(|| PrologError::LibraryNotFound(format!("could not locate libswipl in {dir}")));
             }
         }
         let cands = Self::names().iter().map(|n| n.to_string());
-        Self::first_existing(cands).ok_or_else(|| {
-            PrologError::LibraryNotFound(
-                "could not locate libswipl (tried MORK_METTA_LIBSWIPL, \
-                 swipl --dump-runtime-variables, and common shared library names)"
-                    .into(),
-            )
-        })
+        Self::first_existing(cands).ok_or_else(|| PrologError::LibraryNotFound(
+            "could not locate libswipl (tried MORK_METTA_LIBSWIPL, swipl --dump-runtime-variables, and common shared library names)".into(),
+        ))
     }
     fn first_existing<I: Iterator<Item = String>>(candidates: I) -> Option<String> {
         let mut bare = None;

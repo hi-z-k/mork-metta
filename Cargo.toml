@@ -19,6 +19,7 @@
     pyo3 = { version = "0.23", optional = true, features = ["auto-initialize"] }
     libloading = { version = "0.8", optional = true }
     dlopen2 = { version = "0.8", optional = true }
+    thiserror = "2"
     rayon = "1"
     dashu = "0.4"
     rand = "0.8"

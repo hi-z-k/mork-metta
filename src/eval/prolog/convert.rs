@@ -172,10 +172,8 @@ pub fn term_to_atom(
         PL_INTEGER => {
             let mut val: i64 = 0;
             if unsafe { api.get_int64(term, &mut val) } != 0 { return Ok(Atom::num(val as i128)); }
-            if let Ok(s) = get_str(api, term, CVT_INTEGER) {
-                if let Ok(ibig) = dashu::integer::IBig::from_str_radix(&s, 10) {
-                    return Ok(Atom::Num(Numeric::Int(ibig)));
-                }
+            if let Ok(ibig) = get_str(api, term, CVT_INTEGER).and_then(|s| conv(dashu::integer::IBig::from_str_radix(&s, 10))) {
+                return Ok(Atom::Num(Numeric::Int(ibig)));
             }
             Err(PrologError::Conversion("failed to read Prolog integer".into()))
         }
@@ -191,8 +189,7 @@ pub fn term_to_atom(
             let mut elements = Vec::new();
             let (head, tail) = unsafe { (api.new_term_ref(), api.new_term_ref()) };
             let mut current = term;
-            while unsafe { api.term_type(current) } == PL_LIST_PAIR {
-                if unsafe { api.get_list(current, head, tail) } == 0 { break; }
+            while unsafe { api.term_type(current) } == PL_LIST_PAIR && unsafe { api.get_list(current, head, tail) } != 0 {
                 elements.push(term_to_atom(head, api, reverse_vars)?);
                 current = tail;
             }
@@ -210,9 +207,7 @@ pub fn term_to_atom(
             if name_ptr.is_null() {
                 return Err(PrologError::Conversion("failed to get functor name chars".into()));
             }
-            let name = conv(unsafe { CStr::from_ptr(name_ptr) }.to_str())?;
-            let mut args = Vec::with_capacity(arity as usize + 1);
-            args.push(Atom::sym(name));
+            let mut args = vec![Atom::sym(conv(unsafe { CStr::from_ptr(name_ptr) }.to_str())?)];
             for i in 1..=arity {
                 let arg = unsafe { api.new_term_ref() };
                 if unsafe { api.get_arg(i, term, arg) } == 0 {
