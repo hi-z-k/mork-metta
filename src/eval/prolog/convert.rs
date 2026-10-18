@@ -42,9 +42,7 @@ pub fn atom_to_term(atom: &Atom, api: &Api, var_map: &mut VarMap) -> Result<term
             }
             unsafe { api.put_atom(term, api.new_atom(CString::new(name)?.as_ptr())) };
         }
-        Atom::Str(s) => {
-            unsafe { api.put_string_chars(term, CString::new(s.as_ref())?.as_ptr()) };
-        }
+        Atom::Str(s) => { unsafe { api.put_string_chars(term, CString::new(s.as_ref())?.as_ptr()) }; }
         Atom::Num(Numeric::Int(i)) => {
             if let Ok(v) = i64::try_from(i) { unsafe { api.put_int64(term, v) }; }
             else {
@@ -54,9 +52,7 @@ pub fn atom_to_term(atom: &Atom, api: &Api, var_map: &mut VarMap) -> Result<term
                 }
             }
         }
-        Atom::Num(Numeric::Dec(d)) => {
-            unsafe { api.put_float(term, d.to_f64().value()) };
-        }
+        Atom::Num(Numeric::Dec(d)) => { unsafe { api.put_float(term, d.to_f64().value()) }; }
         Atom::Expr(e) => {
             if let Some((head, args)) = extract_predicate_compound(e) {
                 return compound(api, head, &args, var_map);

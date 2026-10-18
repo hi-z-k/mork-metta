@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::ffi::{CStr, CString, c_char, c_int};
 use std::sync::Arc;
-use crate::atom::Atom;
+use crate::atom::{Atom, Numeric};
 use crate::eval::prolog::convert::{VarMap, atom_to_term, goal_to_term, term_to_atom};
 use crate::eval::prolog::engine::{self, with_engine, EngineManager};
 use crate::eval::prolog::error::PrologError;
@@ -77,6 +77,7 @@ pub fn init_support(manager: &Arc<EngineManager>) -> Result<(), PrologError> {
 'rem'(X, Y, Z) :- Z is X rem Y.
 'abs'(X, Y) :- Y is abs(X).
 '<='(X, Y) :- X =< Y.
+'$arity_of'(Name, A) :- current_predicate(user:Name/A).
 :- multifile user:file_search_path/2.
 :- dynamic user:file_search_path/2.
 user:file_search_path(library, './lib').
@@ -152,40 +153,38 @@ pub fn call_predicate_goal(goal: &Atom) -> Result<Vec<Atom>, PrologError> {
 }
 pub fn call_function(functor_name: &str, args: &[Atom]) -> Result<FunctionOutcome, PrologError> {
     let pooled = engine::manager()?.checkout()?;
-    let api = Api::get()?;
-    let mut old: usize = 0;
-    unsafe { api.set_engine(pooled.engine(), &mut old) };
-    let outcome = unsafe {
-        let frame = api.open_foreign_frame();
-        let mut var_map = VarMap::new();
-        let (c_head, arity) = (CString::new(functor_name)?, args.len() + 1);
-        let a0 = api.new_term_refs(arity as c_int);
-        for (i, arg) in args.iter().enumerate() {
-            api.put_term(a0 + i, atom_to_term(arg, api, &mut var_map)?);
-        }
-        let (result_term, goal_term) = (a0 + args.len(), api.new_term_ref());
-        api.put_variable(result_term);
-        let head_atom = api.new_atom(c_head.as_ptr());
-        if api.cons_functor_v(goal_term, api.new_functor_sz(head_atom, arity), a0) == 0 {
-            api.discard_foreign_frame(frame);
-            return Err(PrologError::Conversion("failed to build function goal".into()));
-        }
-        let qid = open_call(api, goal_term)?;
-        let outcome: Result<FunctionOutcome, PrologError> = match next_solution(api, qid) {
-            StepStatus::Last => Ok(FunctionOutcome::Single(term_to_atom(result_term, api, &mut HashMap::new())?)),
-            StepStatus::False => Ok(FunctionOutcome::Empty),
-            StepStatus::Exception(msg) => Ok(FunctionOutcome::Exception(msg)),
-            StepStatus::True => {
-                let first = term_to_atom(result_term, api, &mut HashMap::new())?;
-                Ok(FunctionOutcome::Stream(collect_rest(api, qid, result_term, first).into_iter()))
+    with_engine(pooled.engine(), |api| -> Result<FunctionOutcome, PrologError> {
+        unsafe {
+            let frame = api.open_foreign_frame();
+            let mut var_map = VarMap::new();
+            let (c_head, arity) = (CString::new(functor_name)?, args.len() + 1);
+            let a0 = api.new_term_refs(arity as c_int);
+            for (i, arg) in args.iter().enumerate() {
+                api.put_term(a0 + i, atom_to_term(arg, api, &mut var_map)?);
             }
-        };
-        api.close_query(qid);
-        api.discard_foreign_frame(frame);
-        outcome?
-    };
-    unsafe { api.set_engine(old, std::ptr::null_mut()) };
-    Ok(outcome)
+            let (result_term, goal_term) = (a0 + args.len(), api.new_term_ref());
+            api.put_variable(result_term);
+            let head_atom = api.new_atom(c_head.as_ptr());
+            let outcome = if api.cons_functor_v(goal_term, api.new_functor_sz(head_atom, arity), a0) == 0 {
+                Err(PrologError::Conversion("failed to build function goal".into()))
+            } else {
+                let qid = open_call(api, goal_term)?;
+                let outcome = match next_solution(api, qid) {
+                    StepStatus::Last => Ok(FunctionOutcome::Single(term_to_atom(result_term, api, &mut HashMap::new())?)),
+                    StepStatus::False => Ok(FunctionOutcome::Empty),
+                    StepStatus::Exception(msg) => Ok(FunctionOutcome::Exception(msg)),
+                    StepStatus::True => {
+                        let first = term_to_atom(result_term, api, &mut HashMap::new())?;
+                        Ok(FunctionOutcome::Stream(collect_rest(api, qid, result_term, first).into_iter()))
+                    }
+                };
+                api.close_query(qid);
+                outcome
+            };
+            api.discard_foreign_frame(frame);
+            outcome
+        }
+    })?
 }
 fn collect_rest(api: &Api, qid: qid_t, result: term_t, first: Atom) -> Vec<Atom> {
     let mut out = vec![first];
@@ -233,30 +232,16 @@ pub fn consult_file(path: &str) -> Result<(), PrologError> {
     })
 }
 pub fn current_arities(name: &str) -> Result<Vec<usize>, PrologError> {
-    let pooled = engine::manager()?.checkout()?;
-    with_engine(pooled.engine(), |api| -> Result<Vec<usize>, PrologError> {
-        unsafe {
-            let frame = api.open_foreign_frame();
-            let c_name = CString::new(name)?;
-            let args = api.new_term_refs(2);
-            api.put_atom(args, api.new_atom(c_name.as_ptr()));
-            let spec = api.new_term_ref();
-            api.cons_functor_v(spec, api.new_functor(api.new_atom(b"/\0".as_ptr() as *const _), 2), args);
-            let user_mod = api.new_module(api.new_atom(b"user\0".as_ptr() as *const _));
-            let p = sys_pred(api, b"current_predicate\0", 1);
-            let q = api.open_query(user_mod, PL_Q_NORMAL, p, spec);
-            let mut arities = BTreeSet::new();
-            if q != 0 {
-                while api.next_solution(q) != 0 {
-                    let mut a: i64 = 0;
-                    if api.get_int64(args + 1, &mut a) != 0 && a >= 0 { arities.insert(a as usize); }
-                }
-                api.close_query(q);
-            }
-            api.discard_foreign_frame(frame);
-            Ok(arities.into_iter().collect())
+    let goal = Atom::expr(vec![Atom::sym("$arity_of"), Atom::sym(name), Atom::sym("$A")]);
+    let mut arities = BTreeSet::new();
+    for solution in run_goal(&goal, &[], |api, var_map| {
+        var_map.get("$A").and_then(|&term| term_to_atom(term, api, &mut HashMap::new()).ok())
+    })? {
+        if let Some(Atom::Num(Numeric::Int(i))) = solution {
+            if let Ok(arity) = usize::try_from(i) { arities.insert(arity); }
         }
-    })?
+    }
+    Ok(arities.into_iter().collect())
 }
 pub fn translate_goal(
     goal: &Atom,

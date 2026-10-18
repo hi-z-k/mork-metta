@@ -23,7 +23,5 @@ impl Grounded for PrologForeign {
     fn as_any(&self) -> &dyn Any { self }
 }
 impl fmt::Display for PrologForeign {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.display_metta())
-    }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self.display_metta()) }
 }
