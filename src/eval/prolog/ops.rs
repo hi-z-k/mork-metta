@@ -54,14 +54,10 @@ fn with_main_frame<R>(f: impl FnOnce(&Api) -> Result<R, PrologError>) -> Result<
 pub fn init_support(manager: &Arc<EngineManager>) -> Result<(), PrologError> {
     let code = r#"
 :- dynamic '&self'/1, '&self'/2, '&self'/3, '&self'/4, '&self'/5, '&self'/6, '&self'/7, '&self'/8.
-'+'(X, Y, Z) :- Z is X + Y.
-'-'(X, Y, Z) :- Z is X - Y.
-'*'(X, Y, Z) :- Z is X * Y.
-'/'(X, Y, Z) :- Z is X / Y.
-'mod'(X, Y, Z) :- Z is X mod Y.
-'rem'(X, Y, Z) :- Z is X rem Y.
-'abs'(X, Y) :- Y is abs(X).
-'<='(X, Y) :- X =< Y.
+'+'(X, Y, Z) :- Z is X + Y. '-'(X, Y, Z) :- Z is X - Y.
+'*'(X, Y, Z) :- Z is X * Y. '/'(X, Y, Z) :- Z is X / Y.
+'mod'(X, Y, Z) :- Z is X mod Y. 'rem'(X, Y, Z) :- Z is X rem Y.
+'abs'(X, Y) :- Y is abs(X). '<='(X, Y) :- X =< Y.
 '$arity_of'(Name, A) :- current_predicate(user:Name/A).
 :- multifile user:file_search_path/2.
 :- dynamic user:file_search_path/2.

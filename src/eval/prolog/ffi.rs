@@ -58,10 +58,7 @@ impl Api {
             let path = Self::locate_library()?;
             let container: Container<Api> = Container::load(&path)
                 .map_err(|e| PrologError::LibraryNotFound(format!("failed to load '{path}': {e}")))?;
-            let mut argv: Vec<*mut c_char> = ["swipl", "-q", "--nosignals"]
-                .iter()
-                .map(|a| CString::new(*a).unwrap().into_raw())
-                .collect();
+            let mut argv: Vec<*mut c_char> = ["swipl", "-q", "--nosignals"].iter().map(|a| CString::new(*a).unwrap().into_raw()).collect();
             if let Ok(home) = std::env::var("SWI_HOME_DIR") {
                 argv.push(CString::new(format!("--home={home}")).unwrap().into_raw());
             }

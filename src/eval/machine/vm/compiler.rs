@@ -1067,11 +1067,7 @@ fn match_expr_pattern(
         (Expr::Str(s1), Expr::Str(s2)) => s1 == s2,
         (Expr::Number(n1), Expr::Number(n2)) => n1 == n2,
         (Expr::List(p_items), Expr::List(a_items)) => {
-            if p_items.len() != a_items.len() { return false; }
-            for (p, a) in p_items.iter().zip(a_items.iter()) {
-                if !match_expr_pattern(p, a, subst) { return false; }
-            }
-            true
+            p_items.len() == a_items.len() && p_items.iter().zip(a_items.iter()).all(|(p, a)| match_expr_pattern(p, a, subst))
         }
         _ => false,
     }
@@ -1081,9 +1077,7 @@ fn subst_expr_template(
     subst: &std::collections::HashMap<String, Expr>,
 ) -> Expr {
     match template {
-        Expr::Symbol(s) if s.starts_with('$') => {
-            if let Some(replacement) = subst.get(s) { replacement.clone() } else { template.clone() }
-        }
+        Expr::Symbol(s) if s.starts_with('$') => subst.get(s).cloned().unwrap_or_else(|| template.clone()),
         Expr::List(items) => {
             Expr::List(items.iter().map(|item| subst_expr_template(item, subst)).collect())
         }
