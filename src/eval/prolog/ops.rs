@@ -167,13 +167,14 @@ pub fn call_function(functor_name: &str, args: &[Atom]) -> Result<FunctionOutcom
             api.put_variable(result_term);
             let pred = api.predicate(c_head.as_ptr(), arity as c_int, b"user\0".as_ptr() as *const _);
             let qid = open_query(api, pred, a0, PL_Q_CATCH_EXCEPTION | PL_Q_EXT_STATUS | PL_Q_NODEBUG)?;
+            let mut reverse_vars = HashMap::new();
             let outcome = match next_solution(api, qid) {
-                StepStatus::Last => Ok(FunctionOutcome::Single(term_to_atom(result_term, api, &mut HashMap::new())?)),
+                StepStatus::Last => Ok(FunctionOutcome::Single(term_to_atom(result_term, api, &mut reverse_vars)?)),
                 StepStatus::False => Ok(FunctionOutcome::Empty),
                 StepStatus::Exception(msg) => Ok(FunctionOutcome::Exception(msg)),
                 StepStatus::True => {
-                    let first = term_to_atom(result_term, api, &mut HashMap::new())?;
-                    Ok(FunctionOutcome::Stream(collect_rest(api, qid, result_term, first).into_iter()))
+                    let first = term_to_atom(result_term, api, &mut reverse_vars)?;
+                    Ok(FunctionOutcome::Stream(collect_rest(api, qid, result_term, first, &mut reverse_vars).into_iter()))
                 }
             };
             api.close_query(qid);
@@ -182,16 +183,16 @@ pub fn call_function(functor_name: &str, args: &[Atom]) -> Result<FunctionOutcom
         }
     })?
 }
-fn collect_rest(api: &Api, qid: qid_t, result: term_t, first: Atom) -> Vec<Atom> {
+fn collect_rest(api: &Api, qid: qid_t, result: term_t, first: Atom, reverse_vars: &mut HashMap<usize, String>) -> Vec<Atom> {
     let mut out = vec![first];
     loop {
         match next_solution(api, qid) {
-            StepStatus::True => match term_to_atom(result, api, &mut HashMap::new()) {
+            StepStatus::True => match term_to_atom(result, api, reverse_vars) {
                 Ok(atom) => out.push(atom),
                 Err(e) => { out.push(e.to_error_atom(&Atom::sym("prolog_stream"))); break; }
             },
             StepStatus::Last => {
-                if let Ok(atom) = term_to_atom(result, api, &mut HashMap::new()) { out.push(atom); }
+                if let Ok(atom) = term_to_atom(result, api, reverse_vars) { out.push(atom); }
                 break;
             }
             StepStatus::False => break,
@@ -243,16 +244,13 @@ pub fn translate_goal(
     goal: &Atom,
     in_bindings: &[(String, Atom)],
 ) -> Result<Vec<Vec<(String, Atom)>>, PrologError> {
-    run_goal(goal, in_bindings, collect_bindings)
-}
-fn collect_bindings(api: &Api, var_map: &VarMap) -> Vec<(String, Atom)> {
-    let mut rev_map = HashMap::new();
-    var_map
-        .iter()
-        .filter_map(|(name, &term)| {
-            term_to_atom(term, api, &mut rev_map).ok().map(|atom| (name.clone(), atom))
-        })
-        .collect()
+    let mut reverse_vars = HashMap::new();
+    run_goal(goal, in_bindings, |api, var_map| {
+        var_map
+            .iter()
+            .filter_map(|(name, &term)| term_to_atom(term, api, &mut reverse_vars).ok().map(|atom| (name.clone(), atom)))
+            .collect()
+    })
 }
 pub fn eval_translate_predicate_atom(
     goal: &Atom,
@@ -262,17 +260,20 @@ pub fn eval_translate_predicate_atom(
 ) -> Result<ResultSet, PrologError> {
     let in_bindings = gather_bindings(base_env, free_vars_map, free_vars_bindings);
     let solutions = translate_goal(goal, &in_bindings)?;
+    let mut aliases: HashMap<&str, &str> = HashMap::new();
+    for (orig, fresh) in free_vars_map.iter().zip(free_vars_bindings) {
+        if let Atom::Sym(f) = fresh {
+            aliases.insert(orig.as_str(), f.as_str());
+            aliases.insert(f.as_str(), orig.as_str());
+        }
+    }
     let mut envs = Vec::with_capacity(solutions.len());
     for solution in solutions {
         let mut env = base_env.clone();
         for (vname, vval) in solution {
             if matches!(&vval, Atom::Sym(s) if s.starts_with("$_V")) { continue; }
             env = env.extend(&vname, vval.clone());
-            for (orig_name, fresh) in free_vars_map.iter().zip(free_vars_bindings) {
-                let Atom::Sym(fresh_s) = fresh else { continue };
-                if orig_name == &vname { env = env.extend(fresh_s, vval.clone()); }
-                else if fresh_s.as_str() == vname { env = env.extend(orig_name, vval.clone()); }
-            }
+            if let Some(other) = aliases.get(vname.as_str()) { env = env.extend(other, vval.clone()); }
         }
         envs.push((Atom::sym("true"), env));
     }
