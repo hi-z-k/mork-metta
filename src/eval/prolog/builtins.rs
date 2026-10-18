@@ -1,5 +1,6 @@
 use crate::atom::Atom;
 use crate::builtins::arithmetic::expect_n_args;
+use crate::eval::prolog::error::PrologError;
 use crate::eval::prolog::ops;
 use crate::func::{FnTable, NDet};
 pub fn register_prolog_builtins(funcs: &FnTable) {
@@ -59,12 +60,16 @@ fn name_arg(atom: &Atom, what: &str) -> Result<String, String> {
 pub fn register_imported_prolog_function(funcs: &FnTable, functor: &str, arity: u8) {
     let functor_name = functor.to_string();
     funcs.insert_native(functor, arity, move |call_args, _| {
-        match ops::call_function(&functor_name, call_args).map_err(|e| e.to_string())? {
-            ops::FunctionOutcome::Single(atom) => Ok(NDet::single(atom)),
-            ops::FunctionOutcome::Stream(iter) => Ok(NDet::stream(iter)),
-            ops::FunctionOutcome::Empty => Ok(NDet::empty()),
-            ops::FunctionOutcome::Exception(msg) => Err(msg),
-        }
+        let mut atoms = match ops::call_function(&functor_name, call_args) {
+            Err(PrologError::Exception(msg)) => return Err(msg),
+            Err(e) => return Err(e.to_string()),
+            Ok(atoms) => atoms,
+        };
+        Ok(match atoms.len() {
+            0 => NDet::empty(),
+            1 => NDet::single(atoms.pop().unwrap()),
+            _ => NDet::stream(atoms.into_iter()),
+        })
     });
     funcs.invalidate_caches();
 }

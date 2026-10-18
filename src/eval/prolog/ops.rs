@@ -12,12 +12,6 @@ use crate::eval::prolog::ffi::{
     Api, CVT_WRITE, PL_Q_CATCH_EXCEPTION, PL_Q_EXT_STATUS, PL_Q_NODEBUG, PL_Q_NORMAL,
     PL_S_EXCEPTION, PL_S_LAST, PL_S_TRUE, predicate_t, qid_t, term_t,
 };
-pub enum FunctionOutcome {
-    Single(Atom),
-    Stream(std::vec::IntoIter<Atom>),
-    Empty,
-    Exception(String),
-}
 enum StepStatus { True, Last, False, Exception(String) }
 fn sys_pred(api: &Api, name: &[u8], arity: c_int) -> predicate_t {
     unsafe { api.predicate(name.as_ptr() as *const _, arity, b"system\0".as_ptr() as *const _) }
@@ -152,9 +146,9 @@ fn run_goal<T>(
 pub fn call_predicate_goal(goal: &Atom) -> Result<Vec<Atom>, PrologError> {
     run_goal(goal, &[], |_, _| Atom::sym("true"))
 }
-pub fn call_function(functor_name: &str, args: &[Atom]) -> Result<FunctionOutcome, PrologError> {
+pub fn call_function(functor_name: &str, args: &[Atom]) -> Result<Vec<Atom>, PrologError> {
     let pooled = engine::manager()?.checkout()?;
-    with_engine(pooled.engine(), |api| -> Result<FunctionOutcome, PrologError> {
+    with_engine(pooled.engine(), |api| -> Result<Vec<Atom>, PrologError> {
         unsafe {
             let frame = api.open_foreign_frame();
             let mut var_map = VarMap::new();
@@ -168,41 +162,42 @@ pub fn call_function(functor_name: &str, args: &[Atom]) -> Result<FunctionOutcom
             let pred = api.predicate(c_head.as_ptr(), arity as c_int, b"user\0".as_ptr() as *const _);
             let qid = open_query(api, pred, a0, PL_Q_CATCH_EXCEPTION | PL_Q_EXT_STATUS | PL_Q_NODEBUG)?;
             let mut reverse_vars = HashMap::new();
-            let outcome = match next_solution(api, qid) {
-                StepStatus::Last => Ok(FunctionOutcome::Single(term_to_atom(result_term, api, &mut reverse_vars)?)),
-                StepStatus::False => Ok(FunctionOutcome::Empty),
-                StepStatus::Exception(msg) => Ok(FunctionOutcome::Exception(msg)),
-                StepStatus::True => {
-                    let first = term_to_atom(result_term, api, &mut reverse_vars)?;
-                    Ok(FunctionOutcome::Stream(collect_rest(api, qid, result_term, first, &mut reverse_vars).into_iter()))
+            let mut atoms = Vec::new();
+            loop {
+                match next_solution(api, qid) {
+                    StepStatus::False => break,
+                    StepStatus::Last => {
+                        match term_to_atom(result_term, api, &mut reverse_vars) {
+                            Ok(atom) => atoms.push(atom),
+                            Err(e) if atoms.is_empty() => return Err(e),
+                            Err(_) => {}
+                        }
+                        break;
+                    }
+                    StepStatus::True => match term_to_atom(result_term, api, &mut reverse_vars) {
+                        Ok(atom) => atoms.push(atom),
+                        Err(e) if atoms.is_empty() => return Err(e),
+                        Err(e) => {
+                            atoms.push(e.to_error_atom(&Atom::sym("prolog_stream")));
+                            break;
+                        }
+                    },
+                    StepStatus::Exception(msg) if atoms.is_empty() => {
+                        api.close_query(qid);
+                        api.discard_foreign_frame(frame);
+                        return Err(PrologError::Exception(msg));
+                    }
+                    StepStatus::Exception(msg) => {
+                        atoms.push(PrologError::Exception(msg).to_error_atom(&Atom::sym("prolog_stream")));
+                        break;
+                    }
                 }
-            };
+            }
             api.close_query(qid);
             api.discard_foreign_frame(frame);
-            outcome
+            Ok(atoms)
         }
     })?
-}
-fn collect_rest(api: &Api, qid: qid_t, result: term_t, first: Atom, reverse_vars: &mut HashMap<usize, String>) -> Vec<Atom> {
-    let mut out = vec![first];
-    loop {
-        match next_solution(api, qid) {
-            StepStatus::True => match term_to_atom(result, api, reverse_vars) {
-                Ok(atom) => out.push(atom),
-                Err(e) => { out.push(e.to_error_atom(&Atom::sym("prolog_stream"))); break; }
-            },
-            StepStatus::Last => {
-                if let Ok(atom) = term_to_atom(result, api, reverse_vars) { out.push(atom); }
-                break;
-            }
-            StepStatus::False => break,
-            StepStatus::Exception(msg) => {
-                out.push(PrologError::Exception(msg).to_error_atom(&Atom::sym("prolog_stream")));
-                break;
-            }
-        }
-    }
-    out
 }
 pub fn assertz_clause(clause: &Atom) -> Result<(), PrologError> {
     with_main_frame(|api| {
