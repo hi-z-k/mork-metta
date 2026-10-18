@@ -700,20 +700,7 @@ impl VMCompiler {
                                                 Some(Opcode::PrologImport { path: p.clone() })
                                             } else {
                                                 let import_dir = current_funcs().map(|f| f.import_dir.lock().unwrap().clone()).unwrap_or_default();
-                                                let dirs = super::run::import_search_dirs(&import_dir);
-                                                if dirs.iter().any(|d| d.join(format!("{p}.metta")).exists()) {
-                                                    Some(Opcode::ImportFile { path: p.clone() })
-                                                } else {
-                                                    let (pl, py) = (format!("{p}.pl"), format!("{p}.py"));
-                                                    let ext = dirs.iter().find_map(|d| {
-                                                        if d.join(&pl).exists() { Some(true) } else if d.join(&py).exists() { Some(false) } else { None }
-                                                    });
-                                                    match ext {
-                                                        Some(true) => Some(Opcode::PrologImport { path: pl }),
-                                                        Some(false) => Some(Opcode::PythonImport { path: py }),
-                                                        None => Some(Opcode::ImportFile { path: p.clone() }),
-                                                    }
-                                                }
+                                                Some(super::run::probe_library_import(p, &import_dir))
                                             }
                                         } else {
                                             None

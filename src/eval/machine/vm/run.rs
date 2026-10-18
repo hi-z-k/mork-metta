@@ -74,6 +74,24 @@ fn resolve_in_bases(path: &str, ext: &str, import_dir: &std::path::Path) -> Opti
         if c.exists() { Some(c) } else { None }
     })
 }
+pub(super) fn probe_library_import(path: &str, import_dir: &std::path::Path) -> Opcode {
+    let dirs = import_search_dirs(import_dir);
+    if dirs.iter().any(|d| d.join(format!("{path}.metta")).exists()) { return Opcode::ImportFile { path: path.to_string() }; }
+    let (pl, py) = (format!("{path}.pl"), format!("{path}.py"));
+    for d in dirs {
+        if d.join(&pl).exists() { return Opcode::PrologImport { path: pl }; }
+        if d.join(&py).exists() { return Opcode::PythonImport { path: py }; }
+    }
+    Opcode::ImportFile { path: path.to_string() }
+}
+#[cfg(feature = "prolog-bridge")]
+fn consult_prolog_import(resolved: &std::path::Path) -> Result<(), String> {
+    crate::eval::prolog::vm::consult_file(&resolved.to_string_lossy()).map_err(|e| e.to_string())
+}
+#[cfg(not(feature = "prolog-bridge"))]
+fn consult_prolog_import(_resolved: &std::path::Path) -> Result<(), String> {
+    Err("prolog-bridge feature not enabled".into())
+}
 fn replace_at_path(atom: &mut Atom, path: &[usize], val: Atom) {
     if path.is_empty() {
         *atom = val;
@@ -2248,14 +2266,9 @@ fn run_vm_inner(
                     let resolved = resolve_import_file(&path, "pl", &import_dir).ok_or_else(|| {
                         format!("import!: cannot find Prolog file '{}' (searched CWD and '{}')", path, import_dir.display())
                     })?;
-                    #[cfg(feature = "prolog-bridge")]
-                    {
-                        crate::eval::prolog::vm::consult_file(&resolved.to_string_lossy())?;
-                        state.stack.push(plain(vec![Atom::sym("true")]));
-                        state.ip += 1;
-                    }
-                    #[cfg(not(feature = "prolog-bridge"))]
-                    { return Err("prolog-bridge feature not enabled".into()); }
+                    consult_prolog_import(&resolved)?;
+                    state.stack.push(plain(vec![Atom::sym("true")]));
+                    state.ip += 1;
                 }
                 Opcode::TranslatePredicate { head, nargs, free_vars_map: _ } => {
                     #[cfg(feature = "prolog-bridge")]
@@ -2355,10 +2368,8 @@ fn run_vm_inner(
                         let import_dir = funcs.import_dir.lock().unwrap().clone();
                         let resolved = resolve_in_bases(path.as_ref(), "pl", &import_dir)
                             .ok_or_else(|| format!("import!: cannot find Prolog file '{}' (searched CWD and '{}')", path, import_dir.display()))?;
-                        #[cfg(feature = "prolog-bridge")]
-                        { crate::eval::prolog::vm::consult_file(&resolved.to_string_lossy())?; state.stack.push(plain(vec![Atom::sym("true")])); }
-                        #[cfg(not(feature = "prolog-bridge"))]
-                        { return Err("prolog-bridge feature not enabled".into()); }
+                        consult_prolog_import(&resolved)?;
+                        state.stack.push(plain(vec![Atom::sym("true")]));
                     } else {
                         let import_dir = funcs.import_dir.lock().unwrap().clone();
                         let resolved = resolve_import_path(path.as_ref(), &import_dir)
