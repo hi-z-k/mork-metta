@@ -2,9 +2,12 @@ use std::collections::{BTreeSet, HashMap};
 use std::ffi::{CStr, CString, c_char, c_int};
 use std::sync::Arc;
 use crate::atom::{Atom, Numeric};
+use crate::env::{Env, EnvNode};
+use crate::eval::machine::budget::ResultSet;
 use crate::eval::prolog::convert::{VarMap, atom_to_term, goal_to_term, term_to_atom};
 use crate::eval::prolog::engine::{self, with_engine, EngineManager};
 use crate::eval::prolog::error::PrologError;
+use crate::eval::shared::env::lookup;
 use crate::eval::prolog::ffi::{
     Api, CVT_WRITE, PL_Q_CATCH_EXCEPTION, PL_Q_EXT_STATUS, PL_Q_NODEBUG, PL_Q_NORMAL,
     PL_S_EXCEPTION, PL_S_LAST, PL_S_TRUE, predicate_t, qid_t, term_t,
@@ -250,6 +253,63 @@ fn collect_bindings(api: &Api, var_map: &VarMap) -> Vec<(String, Atom)> {
             term_to_atom(term, api, &mut rev_map).ok().map(|atom| (name.clone(), atom))
         })
         .collect()
+}
+pub fn eval_translate_predicate_atom(
+    goal: &Atom,
+    base_env: &Env,
+    free_vars_map: &[String],
+    free_vars_bindings: &[Atom],
+) -> Result<ResultSet, PrologError> {
+    let in_bindings = gather_bindings(base_env, free_vars_map, free_vars_bindings);
+    let solutions = translate_goal(goal, &in_bindings)?;
+    let mut envs = Vec::with_capacity(solutions.len());
+    for solution in solutions {
+        let mut env = base_env.clone();
+        for (vname, vval) in solution {
+            if matches!(&vval, Atom::Sym(s) if s.starts_with("$_V")) { continue; }
+            env = env.extend(&vname, vval.clone());
+            for (orig_name, fresh) in free_vars_map.iter().zip(free_vars_bindings) {
+                let Atom::Sym(fresh_s) = fresh else { continue };
+                if orig_name == &vname { env = env.extend(fresh_s, vval.clone()); }
+                else if fresh_s.as_str() == vname { env = env.extend(orig_name, vval.clone()); }
+            }
+        }
+        envs.push((Atom::sym("true"), env));
+    }
+    Ok(envs)
+}
+fn gather_bindings(
+    base_env: &Env,
+    free_vars_map: &[String],
+    free_vars_bindings: &[Atom],
+) -> Vec<(String, Atom)> {
+    let mut bindings = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut curr = base_env.clone();
+    let mut todo = Vec::new();
+    loop {
+        match curr.inner() {
+            EnvNode::Empty => match todo.pop() {
+                Some(next) => curr = next,
+                None => break,
+            },
+            EnvNode::Cons { name, value, next } => {
+                if seen.insert(name.to_string()) { bindings.push((name.to_string(), (**value).clone())); }
+                curr = next.clone();
+            }
+            EnvNode::Link { prefix, base } => {
+                todo.push(base.clone());
+                curr = prefix.clone();
+            }
+        }
+    }
+    for (idx, name) in free_vars_map.iter().enumerate() {
+        let Some(Atom::Sym(fresh_s)) = free_vars_bindings.get(idx) else { continue };
+        let Some(bound_val) = lookup(base_env, fresh_s) else { continue };
+        if seen.insert(name.clone()) { bindings.push((name.clone(), bound_val.clone())); }
+        if seen.insert(fresh_s.to_string()) { bindings.push((fresh_s.to_string(), bound_val)); }
+    }
+    bindings
 }
 pub fn sync_space(atoms: &[Atom]) -> Result<(), PrologError> {
     with_main_frame(|api| unsafe {

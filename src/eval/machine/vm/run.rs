@@ -86,7 +86,7 @@ pub(super) fn probe_library_import(path: &str, import_dir: &std::path::Path) -> 
 }
 #[cfg(feature = "prolog-bridge")]
 fn consult_prolog_import(resolved: &std::path::Path) -> Result<(), String> {
-    crate::eval::prolog::vm::consult_file(&resolved.to_string_lossy()).map_err(|e| e.to_string())
+    crate::eval::prolog::ops::consult_file(&resolved.to_string_lossy()).map_err(|e| e.to_string())
 }
 #[cfg(not(feature = "prolog-bridge"))]
 fn consult_prolog_import(_resolved: &std::path::Path) -> Result<(), String> {
@@ -2288,10 +2288,10 @@ fn run_vm_inner(
                                 let stamp = funcs.memo_stamp.load(std::sync::atomic::Ordering::Relaxed);
                                 if LAST_SYNCED_STAMP.swap(stamp, std::sync::atomic::Ordering::Relaxed) != stamp {
                                     let space_atoms = funcs.space.read().unwrap().get_atoms();
-                                    let _ = crate::eval::prolog::vm::sync_space(&space_atoms);
+                                    let _ = crate::eval::prolog::ops::sync_space(&space_atoms);
                                 }
                             }
-                            results.extend(crate::eval::prolog::vm::eval_translate_predicate_atom(&goal_atom, &base_env, &state.free_vars_map, &state.free_vars_bindings)?);
+                            results.extend(crate::eval::prolog::ops::eval_translate_predicate_atom(&goal_atom, &base_env, &state.free_vars_map, &state.free_vars_bindings).map_err(|e| e.to_string())?);
                         }
                         state.stack.push(results);
                         state.ip += 1;
