@@ -10,11 +10,10 @@ pub struct EngineManager {
 }
 pub fn manager() -> Result<&'static Arc<EngineManager>, PrologError> {
     static MANAGER: OnceLock<Result<Arc<EngineManager>, PrologError>> = OnceLock::new();
-    MANAGER.get_or_init(|| {
-        let manager = EngineManager::new()?;
+    MANAGER.get_or_init(|| EngineManager::new().and_then(|manager| {
         crate::eval::prolog::ops::init_support(&manager)?;
         Ok(manager)
-    }).as_ref().map_err(Clone::clone)
+    })).as_ref().map_err(Clone::clone)
 }
 pub fn with_engine<R>(engine: PL_engine_t, f: impl FnOnce(&Api) -> R) -> Result<R, PrologError> {
     let api = Api::get()?;

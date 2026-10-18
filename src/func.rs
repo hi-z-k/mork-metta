@@ -292,20 +292,10 @@ impl FnTable {
             .cloned();
 
         #[cfg(feature = "prolog-bridge")]
-        let res = if res.is_none() {
-            if crate::eval::prolog::builtins::try_resolve_imported_prolog_function(self, name, arity) {
-                self.map
-                    .read()
-                    .unwrap()
-                    .get(name)
-                    .and_then(|inner| inner.get(&arity))
-                    .cloned()
-            } else {
-                None
-            }
-        } else {
-            res
-        };
+        let res = res.or_else(|| {
+            if !crate::eval::prolog::builtins::try_resolve_imported_prolog_function(self, name, arity) { return None; }
+            self.map.read().unwrap().get(name).and_then(|inner| inner.get(&arity)).cloned()
+        });
         CACHE.with(|c| {
             let mut cache = c.borrow_mut();
             if cache.len() >= 4 {
