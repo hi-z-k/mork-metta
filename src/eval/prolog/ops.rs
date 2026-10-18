@@ -40,19 +40,17 @@ fn read_exception(api: &Api, qid: qid_t) -> String {
         msg
     }
 }
-fn open_call(api: &Api, goal: term_t) -> Result<qid_t, PrologError> {
-    unsafe {
-        let flags = PL_Q_CATCH_EXCEPTION | PL_Q_EXT_STATUS | PL_Q_NODEBUG;
-        match api.open_query(0, flags, sys_pred(api, b"call\0", 1), goal) {
-            0 => Err(PrologError::Internal("PL_open_query returned NULL".into())),
-            qid => Ok(qid),
-        }
-    }
+fn open_query(api: &Api, pred: predicate_t, args: term_t, flags: c_int) -> Result<qid_t, PrologError> {
+    let qid = unsafe { api.open_query(0, flags, pred, args) };
+    if qid == 0 { return Err(PrologError::Internal("PL_open_query returned NULL".into())); }
+    Ok(qid)
 }
-fn run_once(api: &Api, name: &[u8], arity: c_int, args: term_t, flags: c_int) -> Result<c_int, PrologError> {
+fn open_call(api: &Api, goal: term_t) -> Result<qid_t, PrologError> {
+    open_query(api, sys_pred(api, b"call\0", 1), goal, PL_Q_CATCH_EXCEPTION | PL_Q_EXT_STATUS | PL_Q_NODEBUG)
+}
+fn run_once(api: &Api, pred: predicate_t, args: term_t, flags: c_int) -> Result<c_int, PrologError> {
+    let q = open_query(api, pred, args, flags)?;
     unsafe {
-        let q = api.open_query(0, flags, sys_pred(api, name, arity), args);
-        if q == 0 { return Err(PrologError::Internal("PL_open_query returned NULL".into())); }
         let rc = api.next_solution(q);
         if rc == PL_S_EXCEPTION {
             let msg = read_exception(api, q);
@@ -91,9 +89,9 @@ pub fn load_prolog_code(manager: &Arc<EngineManager>, code: &str) -> Result<(), 
             let frame = api.open_foreign_frame();
             let (sargs, c_code) = (api.new_term_refs(2), CString::new(code)?);
             api.put_string_chars(sargs, c_code.as_ptr());
-            let q = api.open_query(0, PL_Q_NORMAL, sys_pred(api, b"open_string\0", 2), sargs);
-            if q == 0 || api.next_solution(q) == 0 {
-                if q != 0 { api.close_query(q); }
+            let q = open_query(api, sys_pred(api, b"open_string\0", 2), sargs, PL_Q_NORMAL)?;
+            if api.next_solution(q) == 0 {
+                api.close_query(q);
                 api.discard_foreign_frame(frame);
                 return Err(PrologError::Internal("failed to open_string".into()));
             }
@@ -106,8 +104,8 @@ pub fn load_prolog_code(manager: &Arc<EngineManager>, code: &str) -> Result<(), 
             api.put_nil(opts);
             api.cons_list(opts, opt, opts);
             api.put_term(lf_args + 1, opts);
-            let q_load = api.open_query(0, PL_Q_NORMAL, sys_pred(api, b"load_files\0", 2), lf_args);
-            if q_load != 0 { api.next_solution(q_load); api.close_query(q_load); }
+            let q_load = open_query(api, sys_pred(api, b"load_files\0", 2), lf_args, PL_Q_NORMAL);
+            if let Ok(q) = q_load { api.next_solution(q); api.close_query(q); }
             api.discard_foreign_frame(frame);
             Ok(())
         }
@@ -162,25 +160,20 @@ pub fn call_function(functor_name: &str, args: &[Atom]) -> Result<FunctionOutcom
             for (i, arg) in args.iter().enumerate() {
                 api.put_term(a0 + i, atom_to_term(arg, api, &mut var_map)?);
             }
-            let (result_term, goal_term) = (a0 + args.len(), api.new_term_ref());
+            let result_term = a0 + args.len();
             api.put_variable(result_term);
-            let head_atom = api.new_atom(c_head.as_ptr());
-            let outcome = if api.cons_functor_v(goal_term, api.new_functor_sz(head_atom, arity), a0) == 0 {
-                Err(PrologError::Conversion("failed to build function goal".into()))
-            } else {
-                let qid = open_call(api, goal_term)?;
-                let outcome = match next_solution(api, qid) {
-                    StepStatus::Last => Ok(FunctionOutcome::Single(term_to_atom(result_term, api, &mut HashMap::new())?)),
-                    StepStatus::False => Ok(FunctionOutcome::Empty),
-                    StepStatus::Exception(msg) => Ok(FunctionOutcome::Exception(msg)),
-                    StepStatus::True => {
-                        let first = term_to_atom(result_term, api, &mut HashMap::new())?;
-                        Ok(FunctionOutcome::Stream(collect_rest(api, qid, result_term, first).into_iter()))
-                    }
-                };
-                api.close_query(qid);
-                outcome
+            let pred = api.predicate(c_head.as_ptr(), arity as c_int, b"user\0".as_ptr() as *const _);
+            let qid = open_query(api, pred, a0, PL_Q_CATCH_EXCEPTION | PL_Q_EXT_STATUS | PL_Q_NODEBUG)?;
+            let outcome = match next_solution(api, qid) {
+                StepStatus::Last => Ok(FunctionOutcome::Single(term_to_atom(result_term, api, &mut HashMap::new())?)),
+                StepStatus::False => Ok(FunctionOutcome::Empty),
+                StepStatus::Exception(msg) => Ok(FunctionOutcome::Exception(msg)),
+                StepStatus::True => {
+                    let first = term_to_atom(result_term, api, &mut HashMap::new())?;
+                    Ok(FunctionOutcome::Stream(collect_rest(api, qid, result_term, first).into_iter()))
+                }
             };
+            api.close_query(qid);
             api.discard_foreign_frame(frame);
             outcome
         }
@@ -210,13 +203,13 @@ fn collect_rest(api: &Api, qid: qid_t, result: term_t, first: Atom) -> Vec<Atom>
 pub fn assertz_clause(clause: &Atom) -> Result<(), PrologError> {
     with_main_frame(|api| {
         let t = goal_to_term(clause, api, &mut VarMap::new())?;
-        run_once(api, b"assertz\0", 1, t, PL_Q_NORMAL).map(|_| ())
+        run_once(api, sys_pred(api, b"assertz\0", 1), t, PL_Q_NORMAL).map(|_| ())
     })
 }
 pub fn retract_clause(clause: &Atom) -> Result<bool, PrologError> {
     with_main_frame(|api| {
         let t = goal_to_term(clause, api, &mut VarMap::new())?;
-        Ok(run_once(api, b"retract\0", 1, t, PL_Q_NORMAL)? != 0)
+        Ok(run_once(api, sys_pred(api, b"retract\0", 1), t, PL_Q_NORMAL)? != 0)
     })
 }
 pub fn consult_file(path: &str) -> Result<(), PrologError> {
@@ -225,7 +218,7 @@ pub fn consult_file(path: &str) -> Result<(), PrologError> {
         let path_term = unsafe { api.new_term_ref() };
         unsafe { api.put_atom_chars(path_term, c_path.as_ptr()) };
         let flags = PL_Q_CATCH_EXCEPTION | PL_Q_NORMAL;
-        if run_once(api, b"consult\0", 1, path_term, flags)? == 0 {
+        if run_once(api, sys_pred(api, b"consult\0", 1), path_term, flags)? == 0 {
             return Err(PrologError::Internal(format!("consult failed for {path}")));
         }
         Ok(())
@@ -281,7 +274,7 @@ pub fn sync_space(atoms: &[Atom]) -> Result<(), PrologError> {
             let self_atom = api.new_atom(b"&self\0".as_ptr() as *const _);
             let f = api.new_functor_sz(self_atom, items.len());
             if api.cons_functor_v(clause_term, f, a0) != 0 {
-                let _ = run_once(api, b"assertz\0", 1, clause_term, PL_Q_NORMAL);
+                let _ = run_once(api, sys_pred(api, b"assertz\0", 1), clause_term, PL_Q_NORMAL);
             }
         }
         Ok(())
