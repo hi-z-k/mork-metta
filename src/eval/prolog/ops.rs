@@ -1,7 +1,6 @@
 use std::collections::{BTreeSet, HashMap};
 use std::ffi::{CStr, CString, c_char, c_int};
 use std::sync::Arc;
-
 use crate::atom::Atom;
 use crate::eval::prolog::convert::{VarMap, atom_to_term, goal_to_term, term_to_atom};
 use crate::eval::prolog::engine::{self, with_engine, EngineManager};
@@ -10,20 +9,16 @@ use crate::eval::prolog::ffi::{
     Api, CVT_WRITE, PL_Q_CATCH_EXCEPTION, PL_Q_EXT_STATUS, PL_Q_NODEBUG, PL_Q_NORMAL,
     PL_S_EXCEPTION, PL_S_LAST, PL_S_TRUE, predicate_t, qid_t, term_t,
 };
-
 pub enum FunctionOutcome {
     Single(Atom),
     Stream(std::vec::IntoIter<Atom>),
     Empty,
     Exception(String),
 }
-
 enum StepStatus { True, Last, False, Exception(String) }
-
 fn sys_pred(api: &Api, name: &[u8], arity: c_int) -> predicate_t {
     unsafe { api.predicate(name.as_ptr() as *const _, arity, b"system\0".as_ptr() as *const _) }
 }
-
 fn next_solution(api: &Api, qid: qid_t) -> StepStatus {
     match unsafe { api.next_solution(qid) } {
         PL_S_LAST => StepStatus::Last,
@@ -32,7 +27,6 @@ fn next_solution(api: &Api, qid: qid_t) -> StepStatus {
         _ => StepStatus::False,
     }
 }
-
 fn read_exception(api: &Api, qid: qid_t) -> String {
     unsafe {
         let ex = api.exception(qid);
@@ -46,7 +40,6 @@ fn read_exception(api: &Api, qid: qid_t) -> String {
         msg
     }
 }
-
 fn open_call(api: &Api, goal: term_t) -> Result<qid_t, PrologError> {
     unsafe {
         let flags = PL_Q_CATCH_EXCEPTION | PL_Q_EXT_STATUS | PL_Q_NODEBUG;
@@ -56,7 +49,6 @@ fn open_call(api: &Api, goal: term_t) -> Result<qid_t, PrologError> {
         }
     }
 }
-
 fn run_once(api: &Api, name: &[u8], arity: c_int, args: term_t, flags: c_int) -> Result<c_int, PrologError> {
     unsafe {
         let q = api.open_query(0, flags, sys_pred(api, name, arity), args);
@@ -71,11 +63,9 @@ fn run_once(api: &Api, name: &[u8], arity: c_int, args: term_t, flags: c_int) ->
         Ok(rc)
     }
 }
-
 fn with_main_frame<R>(f: impl FnOnce(&Api) -> Result<R, PrologError>) -> Result<R, PrologError> {
     engine::manager()?.with_main(|api| { let frame = unsafe { api.open_foreign_frame() }; let result = f(api); unsafe { api.discard_foreign_frame(frame) }; result })?
 }
-
 pub fn init_support(manager: &Arc<EngineManager>) -> Result<(), PrologError> {
     let code = r#"
 :- dynamic '&self'/1, '&self'/2, '&self'/3, '&self'/4, '&self'/5, '&self'/6, '&self'/7, '&self'/8.
@@ -94,7 +84,6 @@ user:file_search_path(library, 'lib').
 "#;
     load_prolog_code(manager, code)
 }
-
 pub fn load_prolog_code(manager: &Arc<EngineManager>, code: &str) -> Result<(), PrologError> {
     manager.with_main(|api| -> Result<(), PrologError> {
         unsafe {
@@ -123,7 +112,6 @@ pub fn load_prolog_code(manager: &Arc<EngineManager>, code: &str) -> Result<(), 
         }
     })?
 }
-
 fn run_goal<T>(
     goal: &Atom,
     in_bindings: &[(String, Atom)],
@@ -159,17 +147,14 @@ fn run_goal<T>(
         }
     })?
 }
-
 pub fn call_predicate_goal(goal: &Atom) -> Result<Vec<Atom>, PrologError> {
     run_goal(goal, &[], |_, _| Atom::sym("true"))
 }
-
 pub fn call_function(functor_name: &str, args: &[Atom]) -> Result<FunctionOutcome, PrologError> {
     let pooled = engine::manager()?.checkout()?;
     let api = Api::get()?;
     let mut old: usize = 0;
     unsafe { api.set_engine(pooled.engine(), &mut old) };
-
     let outcome = unsafe {
         let frame = api.open_foreign_frame();
         let mut var_map = VarMap::new();
@@ -199,11 +184,9 @@ pub fn call_function(functor_name: &str, args: &[Atom]) -> Result<FunctionOutcom
         api.discard_foreign_frame(frame);
         outcome?
     };
-
     unsafe { api.set_engine(old, std::ptr::null_mut()) };
     Ok(outcome)
 }
-
 fn collect_rest(api: &Api, qid: qid_t, result: term_t, first: Atom) -> Vec<Atom> {
     let mut out = vec![first];
     loop {
@@ -225,21 +208,18 @@ fn collect_rest(api: &Api, qid: qid_t, result: term_t, first: Atom) -> Vec<Atom>
     }
     out
 }
-
 pub fn assertz_clause(clause: &Atom) -> Result<(), PrologError> {
     with_main_frame(|api| {
         let t = goal_to_term(clause, api, &mut VarMap::new())?;
         run_once(api, b"assertz\0", 1, t, PL_Q_NORMAL).map(|_| ())
     })
 }
-
 pub fn retract_clause(clause: &Atom) -> Result<bool, PrologError> {
     with_main_frame(|api| {
         let t = goal_to_term(clause, api, &mut VarMap::new())?;
         Ok(run_once(api, b"retract\0", 1, t, PL_Q_NORMAL)? != 0)
     })
 }
-
 pub fn consult_file(path: &str) -> Result<(), PrologError> {
     with_main_frame(|api| {
         let c_path = CString::new(path)?;
@@ -252,7 +232,6 @@ pub fn consult_file(path: &str) -> Result<(), PrologError> {
         Ok(())
     })
 }
-
 pub fn current_arities(name: &str) -> Result<Vec<usize>, PrologError> {
     let pooled = engine::manager()?.checkout()?;
     with_engine(pooled.engine(), |api| -> Result<Vec<usize>, PrologError> {
@@ -279,14 +258,12 @@ pub fn current_arities(name: &str) -> Result<Vec<usize>, PrologError> {
         }
     })?
 }
-
 pub fn translate_goal(
     goal: &Atom,
     in_bindings: &[(String, Atom)],
 ) -> Result<Vec<Vec<(String, Atom)>>, PrologError> {
     run_goal(goal, in_bindings, collect_bindings)
 }
-
 fn collect_bindings(api: &Api, var_map: &VarMap) -> Vec<(String, Atom)> {
     let mut rev_map = HashMap::new();
     var_map
@@ -296,7 +273,6 @@ fn collect_bindings(api: &Api, var_map: &VarMap) -> Vec<(String, Atom)> {
         })
         .collect()
 }
-
 pub fn sync_space(atoms: &[Atom]) -> Result<(), PrologError> {
     with_main_frame(|api| unsafe {
         let c_code = CString::new(

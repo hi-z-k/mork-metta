@@ -867,7 +867,6 @@ impl VMCompiler {
                         _ => {}
                     }
                 }
-
                 if let Expr::Symbol(head) = &items[0] {
                     if let Some(funcs) = current_funcs() {
                         if funcs.translator_rules.read().unwrap().contains(head) {
@@ -1068,7 +1067,6 @@ fn collect_quote_vars(
         _ => {}
     }
 }
-
 fn match_expr_pattern(
     pattern: &Expr,
     arg: &Expr,
@@ -1091,7 +1089,6 @@ fn match_expr_pattern(
         _ => false,
     }
 }
-
 fn subst_expr_template(
     template: &Expr,
     subst: &std::collections::HashMap<String, Expr>,
@@ -1106,4 +1103,3 @@ fn subst_expr_template(
         _ => template.clone(),
     }
 }
-

@@ -1,5 +1,4 @@
 use std::fmt;
-
 #[derive(Debug, Clone)]
 pub enum PrologError {
     LibraryNotFound(String),
@@ -8,7 +7,6 @@ pub enum PrologError {
     Conversion(String),
     Internal(String),
 }
-
 impl fmt::Display for PrologError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (what, e) = match self {
@@ -21,13 +19,10 @@ impl fmt::Display for PrologError {
         write!(f, "{what}: {e}")
     }
 }
-
 impl std::error::Error for PrologError {}
-
 impl From<std::ffi::NulError> for PrologError {
     fn from(e: std::ffi::NulError) -> Self { PrologError::Conversion(e.to_string()) }
 }
-
 impl PrologError {
     pub fn to_error_atom(&self, context: &crate::atom::Atom) -> crate::atom::Atom {
         crate::atom::Atom::expr(vec![

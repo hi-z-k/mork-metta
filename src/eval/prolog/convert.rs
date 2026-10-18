@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char, c_int, c_uint};
 use std::sync::Arc;
-
 use crate::atom::{Atom, Numeric};
 use crate::eval::prolog::error::PrologError;
 use crate::eval::prolog::ffi::{
@@ -9,24 +8,19 @@ use crate::eval::prolog::ffi::{
     PL_STRING, PL_TERM, PL_VARIABLE, atom_t, term_t,
 };
 use crate::eval::prolog::handle::PrologForeign;
-
 pub type VarMap = HashMap<String, term_t>;
-
 pub fn strip_quote_atom(atom: &Atom) -> &Atom {
     match atom {
         Atom::Expr(e) if e.len() == 2 && is_sym(&e[0], "quote") => &e[1],
         _ => atom,
     }
 }
-
 fn is_sym(a: &Atom, name: &str) -> bool {
     matches!(a.as_sym(), Ok(s) if s == name)
 }
-
 fn conv<T>(r: Result<T, impl ToString>) -> Result<T, PrologError> {
     r.map_err(|e| PrologError::Conversion(e.to_string()))
 }
-
 fn get_str(api: &Api, term: term_t, kind: c_uint) -> Result<String, PrologError> {
     let mut ptr: *const c_char = std::ptr::null();
     if unsafe { api.get_chars(term, &mut ptr, kind) } == 0 || ptr.is_null() {
@@ -34,7 +28,6 @@ fn get_str(api: &Api, term: term_t, kind: c_uint) -> Result<String, PrologError>
     }
     conv(unsafe { CStr::from_ptr(ptr) }.to_str()).map(str::to_string)
 }
-
 pub fn atom_to_term(atom: &Atom, api: &Api, var_map: &mut VarMap) -> Result<term_t, PrologError> {
     let atom = strip_quote_atom(atom);
     let term = unsafe { api.new_term_ref() };
@@ -90,7 +83,6 @@ pub fn atom_to_term(atom: &Atom, api: &Api, var_map: &mut VarMap) -> Result<term
     }
     Ok(term)
 }
-
 pub fn goal_to_term(goal: &Atom, api: &Api, var_map: &mut VarMap) -> Result<term_t, PrologError> {
     let goal = strip_quote_atom(goal);
     if let Atom::Expr(items) = goal {
@@ -108,11 +100,9 @@ pub fn goal_to_term(goal: &Atom, api: &Api, var_map: &mut VarMap) -> Result<term
     }
     atom_to_term(goal, api, var_map)
 }
-
 fn is_control(s: &str) -> bool {
     matches!(s, ":-" | "?-" | "," | ";" | "->" | "*->" | "\\+" | "not")
 }
-
 pub fn is_prolog_operator(s: &str) -> bool {
     is_control(s)
         || matches!(
@@ -121,7 +111,6 @@ pub fn is_prolog_operator(s: &str) -> bool {
                 | "div" | "rdiv" | "=" | "\\=" | "<" | ">" | "=<" | ">=" | "=:=" | "=\\="
         )
 }
-
 fn extract_predicate_compound<'a>(items: &'a [Atom]) -> Option<(&'a str, Vec<&'a Atom>)> {
     if items.len() != 2 || !is_sym(&items[0], "Predicate") { return None; }
     match &items[1] {
@@ -133,7 +122,6 @@ fn extract_predicate_compound<'a>(items: &'a [Atom]) -> Option<(&'a str, Vec<&'a
         _ => None,
     }
 }
-
 fn build_compound(api: &Api, head: &str, arg_terms: &[term_t]) -> Result<term_t, PrologError> {
     let (head_atom, term) = unsafe { (api.new_atom(CString::new(head)?.as_ptr()), api.new_term_ref()) };
     if arg_terms.is_empty() {
@@ -149,13 +137,11 @@ fn build_compound(api: &Api, head: &str, arg_terms: &[term_t]) -> Result<term_t,
     }
     Ok(term)
 }
-
 fn compound(api: &Api, head: &str, args: &[&Atom], var_map: &mut VarMap) -> Result<term_t, PrologError> {
     let terms: Result<Vec<term_t>, PrologError> =
         args.iter().map(|a| atom_to_term(a, api, var_map)).collect();
     build_compound(api, head, &terms?)
 }
-
 fn list_to_term(api: &Api, items: &[Atom], var_map: &mut VarMap) -> Result<term_t, PrologError> {
     let list_term = unsafe { api.new_term_ref() };
     unsafe { api.put_nil(list_term) };
@@ -170,7 +156,6 @@ fn list_to_term(api: &Api, items: &[Atom], var_map: &mut VarMap) -> Result<term_
     }
     Ok(current)
 }
-
 pub fn term_to_atom(
     term: term_t,
     api: &Api,

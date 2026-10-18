@@ -1,11 +1,8 @@
 use std::ffi::{CString, c_char, c_int, c_uint, c_void};
 use std::path::Path;
 use std::sync::OnceLock;
-
 use dlopen2::wrapper::{Container, WrapperApi};
-
 use crate::eval::prolog::error::PrologError;
-
 pub type PL_engine_t = usize;
 pub type fid_t = usize;
 pub type term_t = usize;
@@ -15,22 +12,16 @@ pub type module_t = usize;
 pub type predicate_t = usize;
 pub type record_t = usize;
 pub type qid_t = usize;
-
 pub const PL_ENGINE_MAIN: PL_engine_t = 1;
 pub const PL_ENGINE_NONE: PL_engine_t = 0;
-
 pub const PL_Q_NORMAL: c_int = 0x0002; pub const PL_Q_NODEBUG: c_int = 0x0004;
 pub const PL_Q_CATCH_EXCEPTION: c_int = 0x0008; pub const PL_Q_EXT_STATUS: c_int = 0x0040;
-
 pub const PL_S_TRUE: c_int = 1; pub const PL_S_LAST: c_int = 2; pub const PL_S_EXCEPTION: c_int = -1;
-
 pub const PL_VARIABLE: c_int = 1; pub const PL_ATOM: c_int = 2; pub const PL_INTEGER: c_int = 3;
 pub const PL_FLOAT: c_int = 5; pub const PL_STRING: c_int = 6; pub const PL_TERM: c_int = 7;
 pub const PL_NIL: c_int = 8; pub const PL_LIST_PAIR: c_int = 10;
-
 pub const CVT_ATOM: c_uint = 0x0001; pub const CVT_STRING: c_uint = 0x0002;
 pub const CVT_INTEGER: c_uint = 0x0008; pub const CVT_WRITE: c_uint = 0x0080;
-
 macro_rules! swipl {
     ($( $name:ident = $sym:literal ( $($arg:ident : $ty:ty),* ) -> $ret:ty; )*) => {
         #[derive(WrapperApi)]
@@ -39,7 +30,6 @@ macro_rules! swipl {
         }
     };
 }
-
 swipl! {
     initialise = "PL_initialise"(argc: c_int, argv: *mut *mut c_char) -> c_int; create_engine = "PL_create_engine"(attr: *mut c_void) -> PL_engine_t;
     destroy_engine = "PL_destroy_engine"(engine: PL_engine_t) -> c_int; set_engine = "PL_set_engine"(engine: PL_engine_t, old: *mut PL_engine_t) -> c_int;
@@ -63,14 +53,11 @@ swipl! {
     term_type = "PL_term_type"(t: term_t) -> c_int; cons_functor_v = "PL_cons_functor_v"(t: term_t, f: functor_t, args: term_t) -> c_int;
     cons_list = "PL_cons_list"(t: term_t, head: term_t, tail: term_t) -> c_int;
 }
-
 static CONTAINER: OnceLock<Result<Container<Api>, PrologError>> = OnceLock::new();
-
 impl Api {
     pub fn get() -> Result<&'static Api, PrologError> {
         CONTAINER.get_or_init(Self::load).as_ref().map(|c| &**c).map_err(Clone::clone)
     }
-
     fn load() -> Result<Container<Api>, PrologError> {
         unsafe {
             if let Ok(base) = std::env::var("PLBASE") { std::env::set_var("SWI_HOME_DIR", &base); }
@@ -93,11 +80,9 @@ impl Api {
             Ok(container)
         }
     }
-
     fn names() -> &'static [&'static str] {
         &["libswipl.so.10", "libswipl.so.9", "libswipl.so.8", "libswipl.so", "libswipl.dylib"]
     }
-
     fn locate_library() -> Result<String, PrologError> {
         if let Ok(path) = std::env::var("MORK_METTA_LIBSWIPL") {
             if let Some(base) = Path::new(&path).parent().and_then(Path::parent).and_then(Path::parent) {
@@ -138,7 +123,6 @@ impl Api {
             )
         })
     }
-
     fn first_existing<I: Iterator<Item = String>>(candidates: I) -> Option<String> {
         let mut bare = None;
         for cand in candidates {

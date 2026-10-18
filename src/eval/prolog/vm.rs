@@ -3,15 +3,12 @@ use crate::env::{Env, EnvNode};
 use crate::eval::machine::budget::ResultSet;
 use crate::eval::prolog::ops;
 use crate::eval::shared::env::lookup;
-
 pub fn consult_file(path: &str) -> Result<(), String> {
     ops::consult_file(path).map_err(|e| e.to_string())
 }
-
 pub fn sync_space(atoms: &[Atom]) -> Result<(), String> {
     ops::sync_space(atoms).map_err(|e| e.to_string())
 }
-
 pub fn eval_translate_predicate_atom(
     goal: &Atom,
     base_env: &Env,
@@ -36,7 +33,6 @@ pub fn eval_translate_predicate_atom(
     }
     Ok(envs)
 }
-
 fn gather_bindings(
     base_env: &Env,
     free_vars_map: &[String],

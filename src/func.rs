@@ -189,7 +189,6 @@ impl FnTable {
         self.memo_cache.write().unwrap().clear();
         self.lazy_mask_cache.write().unwrap().clear();
     }
-
     pub fn insert_native<F>(&self, name: &str, arity: u8, func: F)
     where
         F: Fn(&[Atom], &FnTable) -> Result<NDet, String> + Send + Sync + 'static,
@@ -307,7 +306,6 @@ impl FnTable {
         } else {
             res
         };
-
         CACHE.with(|c| {
             let mut cache = c.borrow_mut();
             if cache.len() >= 4 {

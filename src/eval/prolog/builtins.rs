@@ -2,7 +2,6 @@ use crate::atom::Atom;
 use crate::builtins::arithmetic::expect_n_args;
 use crate::eval::prolog::ops;
 use crate::func::{FnTable, NDet};
-
 pub fn register_prolog_builtins(funcs: &FnTable) {
     funcs.insert_native("Predicate", 1, |args, _| {
         expect_n_args(args, 1, "Predicate")?;
@@ -50,7 +49,6 @@ pub fn register_prolog_builtins(funcs: &FnTable) {
         Ok(NDet::single(Atom::sym("True")))
     });
 }
-
 fn name_arg(atom: &Atom, what: &str) -> Result<String, String> {
     match atom {
         Atom::Sym(s) => Ok(s.as_str().to_string()),
@@ -58,7 +56,6 @@ fn name_arg(atom: &Atom, what: &str) -> Result<String, String> {
         other => Err(format!("{what} expects symbol or string, got {other:?}")),
     }
 }
-
 pub fn register_imported_prolog_function(funcs: &FnTable, functor: &str, arity: u8) {
     let functor_name = functor.to_string();
     funcs.insert_native(functor, arity, move |call_args, _| {
@@ -71,7 +68,6 @@ pub fn register_imported_prolog_function(funcs: &FnTable, functor: &str, arity: 
     });
     funcs.invalidate_caches();
 }
-
 pub fn try_resolve_imported_prolog_function(funcs: &FnTable, name: &str, arity: u8) -> bool {
     if !funcs.imported_prolog_funcs.read().unwrap().contains(name) { return false; }
     if let Ok(arities) = ops::current_arities(name) {

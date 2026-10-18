@@ -62,11 +62,9 @@ fn resolve_import_file(path: &str, ext: &str, import_dir: &std::path::Path) -> O
     [std::path::PathBuf::from(&with_ext), import_dir.join(path), import_dir.join(&with_ext)]
         .into_iter().find(|p| p.exists())
 }
-
 pub(super) fn import_search_dirs(import_dir: &std::path::Path) -> [std::path::PathBuf; 5] {
     [std::path::PathBuf::from("."), import_dir.to_path_buf(), std::path::PathBuf::from("lib"), import_dir.join("../lib"), import_dir.join("lib")]
 }
-
 fn resolve_in_bases(path: &str, ext: &str, import_dir: &std::path::Path) -> Option<std::path::PathBuf> {
     let with_ext = format!("{path}.{ext}");
     import_search_dirs(import_dir).iter().find_map(|b| {
@@ -76,7 +74,6 @@ fn resolve_in_bases(path: &str, ext: &str, import_dir: &std::path::Path) -> Opti
         if c.exists() { Some(c) } else { None }
     })
 }
-
 fn replace_at_path(atom: &mut Atom, path: &[usize], val: Atom) {
     if path.is_empty() {
         *atom = val;
