@@ -104,6 +104,18 @@ fn atom_has_symbol(atom: &Atom, target: &str) -> bool {
         _ => false,
     }
 }
+#[cfg(feature = "prolog-bridge")]
+fn sync_space_if_needed(goal_atom: &Atom, funcs: &FnTable) {
+    if !atom_has_symbol(goal_atom, "&self") {
+        return;
+    }
+    static LAST_SYNCED_STAMP: AtomicU64 = AtomicU64::new(u64::MAX);
+    let stamp = funcs.memo_stamp.load(Ordering::Relaxed);
+    if LAST_SYNCED_STAMP.swap(stamp, Ordering::Relaxed) != stamp {
+        let space_atoms = funcs.space.read().unwrap().get_atoms();
+        let _ = sync_space(&space_atoms);
+    }
+}
 fn replace_at_path(atom: &mut Atom, path: &[usize], val: Atom) {
     if path.is_empty() {
         *atom = val;
@@ -2295,14 +2307,7 @@ fn run_vm_inner(
                             let mut goal_items = vec![head_atom.clone()];
                             for arg in &combo { goal_items.push(subst_atom(arg, &combo_env)); }
                             let goal_atom = Atom::Expr(expr_data(goal_items));
-                            if atom_has_symbol(&goal_atom, "&self") {
-                                static LAST_SYNCED_STAMP: AtomicU64 = AtomicU64::new(u64::MAX);
-                                let stamp = funcs.memo_stamp.load(Ordering::Relaxed);
-                                if LAST_SYNCED_STAMP.swap(stamp, Ordering::Relaxed) != stamp {
-                                    let space_atoms = funcs.space.read().unwrap().get_atoms();
-                                    let _ = sync_space(&space_atoms);
-                                }
-                            }
+                            sync_space_if_needed(&goal_atom, funcs);
                             results.extend(eval_translate_predicate_atom(&goal_atom, &base_env, &state.free_vars_map, &state.free_vars_bindings).map_err(|e| e.to_string())?);
                         }
                         state.stack.push(results);
@@ -3281,52 +3286,52 @@ fn dispatch_call(
 
 /// Run the next iteration of the Let opcode in flat frame-based control flow.
 fn run_next_let_iteration(state: &mut VMState, funcs: &FnTable) -> Result<Option<Env>, String> {
-    let mut to_run = None;
     let saved_base_env = state.frames.last().map(|f| f.saved_base_env.clone()).unwrap_or_else(Env::new);
-    if let Some(frame) = state.frames.last_mut() {
-        if let CallFrameKind::Let {
-            value_rs,
-            next_idx,
-            pattern,
-            pattern_vars,
-            seed_vars,
-            free_vars_map,
-            body_code,
-            results: _,
-        } = &mut frame.kind
-        {
-            while *next_idx < value_rs.len() {
-                let (value, value_env) = &value_rs[*next_idx];
-                *next_idx += 1;
-                let mut seed_env = Env::new();
-                for var in seed_vars.iter() {
-                    if let Some(bound) = lookup(&saved_base_env, var) { seed_env = bind(&seed_env, var, bound); }
-                }
-                if let Some(match_env) = try_match_one(pattern, value, &seed_env, funcs)? {
-                    let body_env = prepend_chain(match_env, value_env);
-                    let mut locals_to_push = Vec::new();
-                    for var in pattern_vars {
-                        let bound = body_env.get(var).unwrap_or(Atom::sym("()"));
-                        locals_to_push.push((bound, Env::new()));
-                    }
-                    frame.locals_to_pop = locals_to_push.len();
-                    to_run = Some((
-                        body_code.clone(),
-                        free_vars_map.clone(),
-                        body_env,
-                        locals_to_push,
-                    ));
-                    break;
-                } else {
-                    logical_failure(|| {
-                        format!(
-                            "warn: let pattern {} does not match value {}",
-                            pattern.to_string(),
-                            value.to_sexpr_string(),
-                        )
-                    });
-                }
+    let Some(frame) = state.frames.last_mut() else { return Ok(None); };
+    let CallFrameKind::Let {
+        value_rs,
+        next_idx,
+        pattern,
+        pattern_vars,
+        seed_vars,
+        free_vars_map,
+        body_code,
+        results: _,
+    } = &mut frame.kind else {
+        return Ok(None);
+    };
+
+    let mut to_run = None;
+    while *next_idx < value_rs.len() {
+        let (value, value_env) = &value_rs[*next_idx];
+        *next_idx += 1;
+        let mut seed_env = Env::new();
+        for var in seed_vars.iter() {
+            if let Some(bound) = lookup(&saved_base_env, var) { seed_env = bind(&seed_env, var, bound); }
+        }
+        if let Some(match_env) = try_match_one(pattern, value, &seed_env, funcs)? {
+            let body_env = prepend_chain(match_env, value_env);
+            let mut locals_to_push = Vec::new();
+            for var in pattern_vars {
+                let bound = body_env.get(var).unwrap_or(Atom::sym("()"));
+                locals_to_push.push((bound, Env::new()));
             }
+            frame.locals_to_pop = locals_to_push.len();
+            to_run = Some((
+                body_code.clone(),
+                free_vars_map.clone(),
+                body_env,
+                locals_to_push,
+            ));
+            break;
+        } else {
+            logical_failure(|| {
+                format!(
+                    "warn: let pattern {} does not match value {}",
+                    pattern.to_string(),
+                    value.to_sexpr_string(),
+                )
+            });
         }
     }
 

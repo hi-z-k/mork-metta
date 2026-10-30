@@ -689,39 +689,7 @@ impl VMCompiler {
                         "import!" if items.len() == 3 => {
                             // path is always a compile-time literal; compile space-ref arg only
                             // Performance: avoids a full CEK round-trip just to eval &self
-                            let path_opcode = match &items[2] {
-                                Expr::List(lib) if lib.len() == 2 => {
-                                    if let (Expr::Symbol(head), Expr::Symbol(p) | Expr::Str(p)) =
-                                        (&lib[0], &lib[1])
-                                    {
-                                        if head == "library" {
-                                            if p.ends_with(".py") {
-                                                Some(Opcode::PythonImport { path: p.clone() })
-                                            } else if p.ends_with(".pl") {
-                                                Some(Opcode::PrologImport { path: p.clone() })
-                                            } else {
-                                                let import_dir = current_funcs().map(|f| f.import_dir.lock().unwrap().clone()).unwrap_or_default();
-                                                Some(super::run::probe_library_import(p, &import_dir))
-                                            }
-                                        } else {
-                                            None
-                                        }
-                                    } else {
-                                        None
-                                    }
-                                }
-                                Expr::Symbol(p) | Expr::Str(p) => {
-                                    if p.ends_with(".py") {
-                                        Some(Opcode::PythonImport { path: p.clone() })
-                                    } else if p.ends_with(".pl") {
-                                        Some(Opcode::PrologImport { path: p.clone() })
-                                    } else {
-                                        Some(Opcode::ImportFile { path: p.clone() })
-                                    }
-                                }
-                                _ => None,
-                            };
-                            if let Some(opcode) = path_opcode {
+                            if let Some(opcode) = resolve_import_opcode(&items[2], current_funcs()) {
                                 self.compile(&items[1], code, false)?; // evaluate space-ref
                                 code.push(opcode);
                                 return Ok(());
@@ -855,26 +823,9 @@ impl VMCompiler {
                         _ => {}
                     }
                 }
-                if let Expr::Symbol(head) = &items[0] {
-                    if let Some(funcs) = current_funcs() {
-                        if funcs.translator_rules.read().unwrap().contains(head) {
-                            let arity = (items.len() - 1) as u8;
-                            if let Some(clauses) = lookup_user_clauses(head, arity, funcs) {
-                                for (patterns, body) in &clauses {
-                                    let mut subst = HashMap::new();
-                                    if patterns.iter().zip(items[1..].iter()).all(|(p, a)| match_expr_pattern(p, a, &mut subst)) {
-                                        let template = match body {
-                                            Expr::List(q) if q.len() == 2 => match &q[0] {
-                                                Expr::Symbol(s) if s == "quote" => &q[1],
-                                                _ => body,
-                                            },
-                                            _ => body,
-                                        };
-                                        return self.compile(&subst_expr_template(template, &subst), code, is_tail);
-                                    }
-                                }
-                            }
-                        }
+                if let (Expr::Symbol(head), Some(funcs)) = (&items[0], current_funcs()) {
+                    if let Some(expanded) = try_expand_translator_rule(head, &items[1..], funcs) {
+                        return self.compile(&expanded, code, is_tail);
                     }
                 }
                 // General application
@@ -1083,5 +1034,56 @@ fn subst_expr_template(
             Expr::List(items.iter().map(|item| subst_expr_template(item, subst)).collect())
         }
         _ => template.clone(),
+    }
+}
+
+fn unquote_template(body: &Expr) -> &Expr {
+    match body {
+        Expr::List(q) if q.len() == 2 && matches!(&q[0], Expr::Symbol(s) if s == "quote") => &q[1],
+        _ => body,
+    }
+}
+
+fn try_expand_translator_rule(head: &str, args: &[Expr], funcs: &FnTable) -> Option<Expr> {
+    if !funcs.translator_rules.read().ok()?.contains(head) {
+        return None;
+    }
+    let arity = u8::try_from(args.len()).ok()?;
+    let clauses = lookup_user_clauses(head, arity, funcs)?;
+
+    clauses.iter().find_map(|(patterns, body)| {
+        let mut subst = HashMap::new();
+        let matched = patterns.iter().zip(args).all(|(p, a)| match_expr_pattern(p, a, &mut subst));
+        if matched {
+            Some(subst_expr_template(unquote_template(body), &subst))
+        } else {
+            None
+        }
+    })
+}
+
+fn resolve_path_opcode(path: &str, is_library: bool, funcs: Option<&FnTable>) -> Opcode {
+    if path.ends_with(".py") {
+        Opcode::PythonImport { path: path.to_string() }
+    } else if path.ends_with(".pl") {
+        Opcode::PrologImport { path: path.to_string() }
+    } else if is_library {
+        let import_dir = funcs.map(|f| f.import_dir.lock().unwrap().clone()).unwrap_or_default();
+        super::run::probe_library_import(path, &import_dir)
+    } else {
+        Opcode::ImportFile { path: path.to_string() }
+    }
+}
+
+fn resolve_import_opcode(spec: &Expr, funcs: Option<&FnTable>) -> Option<Opcode> {
+    match spec {
+        Expr::List(lib) if lib.len() == 2 => match (&lib[0], &lib[1]) {
+            (Expr::Symbol(head), Expr::Symbol(p) | Expr::Str(p)) if head == "library" => {
+                Some(resolve_path_opcode(p, true, funcs))
+            }
+            _ => None,
+        },
+        Expr::Symbol(p) | Expr::Str(p) => Some(resolve_path_opcode(p, false, funcs)),
+        _ => None,
     }
 }
